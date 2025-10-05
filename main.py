@@ -14,9 +14,8 @@ except Exception:
 APP_TITLE = "green david app"
 DB_PATH = "data.db"
 
-app = FastAPI(title=APP_TITLE, description="Správa zakázek, skladu a zaměstnanců (CZ)", version="7.0")
+app = FastAPI(title=APP_TITLE, description="Správa zakázek, skladu a zaměstnanců (CZ)", version="8.0")
 
-# ------------------ DB ------------------
 def get_conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
@@ -27,57 +26,12 @@ def column_exists(conn, table, col):
 def init_db():
     with closing(get_conn()) as conn:
         c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS employees (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jmeno TEXT NOT NULL,
-                pozice TEXT
-            );
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS projects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nazev TEXT NOT NULL,
-                zakaznik TEXT,
-                poznamka TEXT
-            );
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nazev TEXT NOT NULL,
-                mnozstvi REAL NOT NULL DEFAULT 0,
-                jednotka TEXT NOT NULL DEFAULT 'ks'
-            );
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                typ TEXT NOT NULL,
-                popis TEXT NOT NULL,
-                hotovo INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-            );
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS work_entries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL,
-                employee_id INTEGER NOT NULL,
-                datum TEXT NOT NULL,
-                hodiny REAL NOT NULL,
-                poznamka TEXT,
-                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
-            );
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value BLOB
-            );
-        """)
+        c.execute("CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY AUTOINCREMENT, jmeno TEXT NOT NULL, pozice TEXT);")
+        c.execute("CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, nazev TEXT NOT NULL, zakaznik TEXT, poznamka TEXT);")
+        c.execute("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, nazev TEXT NOT NULL, mnozstvi REAL NOT NULL DEFAULT 0, jednotka TEXT NOT NULL DEFAULT 'ks');")
+        c.execute("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, typ TEXT NOT NULL, popis TEXT NOT NULL, hotovo INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);")
+        c.execute("CREATE TABLE IF NOT EXISTS work_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, employee_id INTEGER NOT NULL, datum TEXT NOT NULL, hodiny REAL NOT NULL, poznamka TEXT, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE);")
+        c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value BLOB);")
         conn.commit()
         if not column_exists(conn, "work_entries", "poznamka"):
             c.execute("ALTER TABLE work_entries ADD COLUMN poznamka TEXT")
@@ -87,39 +41,21 @@ def init_db():
 def _startup():
     init_db()
 
-# ------------------ HTML ------------------
 def icon_svg(kind: str) -> str:
-    # minimalistické inline SVG ikony (bez externích zdrojů)
     if kind == "projects":
-        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' "
-                "stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-                "<rect x='3' y='4' width='18' height='14' rx='2'></rect>"
-                "<line x1='7' y1='8' x2='17' y2='8'></line>"
-                "<line x1='7' y1='12' x2='17' y2='12'></line>"
-                "</svg>")
+        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='14' rx='2'></rect><line x1='7' y1='8' x2='17' y2='8'></line><line x1='7' y1='12' x2='17' y2='12'></line></svg>")
     if kind == "stock":
-        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' "
-                "stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-                "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'></path>"
-                "<polyline points='7 10 12 15 17 10'></polyline>"
-                "<line x1='12' y1='15' x2='12' y2='3'></line>"
-                "</svg>")
+        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'></path><polyline points='7 10 12 15 17 10'></polyline><line x1='12' y1='15' x2='12' y2='3'></line></svg>")
     if kind == "people":
-        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' "
-                "stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-                "<path d='M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'></path>"
-                "<circle cx='9' cy='7' r='4'></circle>"
-                "<path d='M23 21v-2a4 4 0 0 0-3-3.87'></path>"
-                "<path d='M16 3.13a4 4 0 0 1 0 7.75'></path>"
-                "</svg>")
+        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'></path><circle cx='9' cy='7' r='4'></circle><path d='M23 21v-2a4 4 0 0 0-3-3.87'></path><path d='M16 3.13a4 4 0 0 1 0 7.75'></path></svg>")
     return ""
 
 def layout(body_html: str, subtitle: str = "") -> str:
     title = APP_TITLE if not subtitle else f"{APP_TITLE} · {subtitle}"
     with closing(get_conn()) as conn:
         has_logo = conn.execute("SELECT 1 FROM settings WHERE key='logo_mime'").fetchone() is not None
-    logo = "<img src='/logo' alt='logo' style='height:28px;vertical-align:middle;margin-right:8px'>" if has_logo else ""
-
+    logo = "<img src='/logo' alt='logo' style='height:28px;vertical-align:middle;margin-right:10px'>" if has_logo else ""
+    header_content = f"<a href='/' style='display:flex;align-items:center;gap:10px;color:#fff;text-decoration:none'>{logo}<span>{APP_TITLE}</span></a>"
     tpl = """
 <!DOCTYPE html>
 <html lang="cs">
@@ -129,16 +65,16 @@ def layout(body_html: str, subtitle: str = "") -> str:
   <title>{{TITLE}}</title>
   <style>
     :root {
-      --bg:#e7f4ed;           /* světlé pozadí stránky */
-      --box:#3e4347;          /* tmavší šedá boxy */
-      --panel:#f3f5f7;        /* světlá šedá uvnitř boxu */
-      --text-dark:#333333;    /* text na světlém pozadí */
-      --text-light:#ffffff;   /* text na tmavém pozadí */
+      --bg:#e7f4ed;
+      --box:#3e4347;
+      --panel:#f3f5f7;
+      --text-dark:#333333;
+      --text-light:#ffffff;
       --accent:#69bb8a;
     }
     * { box-sizing: border-box; }
     body { background: var(--bg); color: var(--text-dark); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; margin:0; }
-    header { background: var(--box); color: var(--text-light); padding:16px; display:flex; align-items:center; gap:12px; justify-content:flex-start; font-weight:800; font-size:22px; }
+    header { background: var(--box); color: var(--text-light); padding:16px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:22px; }
     main { padding:24px; max-width:1200px; margin:0 auto; }
     .grid { display:grid; grid-template-columns: 1fr; gap:22px; }
     @media (min-width: 980px) { .grid { grid-template-columns: 1fr 1fr; } }
@@ -151,18 +87,20 @@ def layout(body_html: str, subtitle: str = "") -> str:
     input::placeholder, textarea::placeholder { color:#7a7a7a; }
     button { background: var(--accent); border:none; color:#fff; padding:8px 12px; border-radius:8px; cursor:pointer; }
     button:hover { filter: brightness(0.95); }
-    a { color:#0e593b; text-decoration:none; font-weight:600; }
+    a { color: inherit; text-decoration: underline; }
+    .panel a { color:#333; }
+    .box a { color:#fff; }
     .footer { position:fixed; bottom:0; left:0; right:0; background: var(--box); color: var(--text-light); text-align:center; padding:10px; }
     table { width:100%; border-collapse:collapse; }
     th, td { padding:8px 10px; border-bottom:1px solid #00000010; text-align:left; }
     .pill { display:inline-block; background:#ffffff; padding:2px 8px; border-radius:999px; font-size:12px; color:#2f3a33; }
     .task-toggle { background:#fff; color:#2f3a33; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:8px; }
     .topbar { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:14px; }
-    .topbar a.small { font-size:13px; color:#cde9dc; }
+    .topbar a.small { font-size:13px; color:#ddd; }
   </style>
 </head>
 <body>
-  <header>{{LOGO}} <span>{{APP_TITLE}}</span></header>
+  <header>{{HEADER}}</header>
   <main>
     {{BODY_HTML}}
   </main>
@@ -170,12 +108,10 @@ def layout(body_html: str, subtitle: str = "") -> str:
 </body>
 </html>
 """
-    return tpl.replace("{{TITLE}}", title)\
-              .replace("{{LOGO}}", logo)\
-              .replace("{{APP_TITLE}}", APP_TITLE)\
-              .replace("{{BODY_HTML}}", body_html)
+    return (tpl.replace("{{TITLE}}", title)
+              .replace("{{HEADER}}", header_content)
+              .replace("{{BODY_HTML}}", body_html))
 
-# ------------------ Sekce ------------------
 def projects_section():
     with closing(get_conn()) as conn:
         rows = conn.execute("SELECT id, nazev, zakaznik FROM projects ORDER BY id DESC").fetchall()
@@ -236,7 +172,7 @@ def employees_section():
             h = conn.execute("SELECT COALESCE(SUM(hodiny),0) FROM work_entries WHERE employee_id=?", (rid,)).fetchone()[0]
             sums[rid] = float(h or 0)
     if rows:
-        lis = "".join([f"<tr><td>{j}</td><td class='muted'>{p or '—'}</td><td><span class='pill'>{sums[i]:.2f} h</span></td></tr>" for i,j,p in rows])
+        lis = "".join([f"<tr><td><a href='/zamestnanec/{i}'>{j}</a></td><td class='muted'>{p or '—'}</td><td><span class='pill'>{sums[i]:.2f} h</span></td></tr>" for i,j,p in rows])
     else:
         lis = "<tr><td colspan='3' class='muted'>Žádní zaměstnanci zatím nejsou.</td></tr>"
     html = f"""
@@ -262,11 +198,9 @@ def employees_section():
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    # Požadované pořadí: Zakázky, Sklad, Zaměstnanci
     body = "<div class='grid'>" + projects_section() + items_section() + employees_section() + "</div>"
     return HTMLResponse(layout(body))
 
-# ---------- Detail zakázky ----------
 @app.get("/zakazka/{pid}", response_class=HTMLResponse)
 def project_detail(pid: int):
     with closing(get_conn()) as conn:
@@ -351,7 +285,44 @@ def project_detail(pid: int):
     """
     return HTMLResponse(layout(html, f"Zakázka {p[1]}"))
 
-# ---------- Actions ----------
+@app.get("/zamestnanec/{eid}", response_class=HTMLResponse)
+def employee_detail(eid: int):
+    with closing(get_conn()) as conn:
+        emp = conn.execute("SELECT id, jmeno, pozice FROM employees WHERE id=?", (eid,)).fetchone()
+        if not emp:
+            return HTMLResponse(layout("<div class='box'>Zaměstnanec nenalezen.</div>", "Zaměstnanec"), status_code=404)
+        rows = conn.execute("""
+            SELECT we.datum, p.nazev, we.hodiny, COALESCE(we.poznamka,''), p.id
+            FROM work_entries we
+            JOIN projects p ON p.id = we.project_id
+            WHERE we.employee_id=?
+            ORDER BY we.datum DESC
+        """,(eid,)).fetchall()
+    total = sum(float(r[2]) for r in rows) if rows else 0.0
+    lines = "".join([
+        f"<tr><td>{d}</td><td><a href='/zakazka/{pid}'>{pname}</a></td><td>{float(h):.2f} h</td><td class='muted'>{note.replace('<','&lt;')}</td></tr>"
+        for (d, pname, h, note, pid) in rows
+    ]) or "<tr><td colspan='4' class='muted'>Žádné záznamy.</td></tr>"
+
+    html = f"""
+    <div class="box">
+      <h2>{icon_svg('people')} Zaměstnanec: {emp[1]}</h2>
+      <div class="panel" style="margin-bottom:12px;">
+        <div><b>Pozice:</b> {emp[2] or '—'}</div>
+        <div class="muted"><b>Celkem hodin:</b> {total:.2f} h</div>
+      </div>
+      <div class="panel">
+        <table>
+          <thead><tr><th>Datum</th><th>Zakázka</th><th>Hodin</th><th>Poznámka</th></tr></thead>
+          <tbody>{lines}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;"><a href="/">← Zpět na přehled</a></div>
+    </div>
+    """
+    return HTMLResponse(layout(html, f"Zaměstnanec {emp[1]}"))
+
+# Actions
 @app.post("/pridat-zamestnance")
 def add_employee(jmeno: str = Form(...), pozice: str = Form(default="")):
     with closing(get_conn()) as conn:
@@ -399,7 +370,6 @@ def add_hours(pid: int, datum: str = Form(...), employee_id: int = Form(...), ho
         conn.commit()
     return RedirectResponse(f"/zakazka/{pid}", status_code=303)
 
-# ---------- Export XLSX ----------
 @app.get("/zakazka/{pid}/export-xlsx")
 def export_xlsx(pid: int):
     if WB is None:
@@ -427,18 +397,15 @@ def export_xlsx(pid: int):
     wb.save(buf)
     buf.seek(0)
     filename = f"zakazka_{(p[1] if p else 'export').replace(' ','_')}_hodiny.xlsx"
-    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
-        "Content-Disposition": f"attachment; filename={filename}"
-    })
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
-# ---------- Nastavení a logo ----------
 @app.get("/nastaveni", response_class=HTMLResponse)
 def settings_page():
     html = """
     <div class="box">
       <h2>Nastavení</h2>
       <div class="panel">
-        <p>Logo firmy: nahrajte PNG/JPG/SVG – bude zobrazeno vlevo nahoře v horní liště.</p>
+        <p>Logo firmy: nahrajte PNG/JPG/SVG – bude uprostřed horní lišty a funguje jako tlačítko „zpět na přehled“ (klik na lištu).</p>
         <form method="post" action="/upload-logo" enctype="multipart/form-data">
           <input type="file" name="logo" accept="image/*" required>
           <button type="submit">Nahrát logo</button>
