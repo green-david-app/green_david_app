@@ -9,41 +9,38 @@
   <body>
     <header class="header">
       <div class="brand">
-        <div class="brand-logo">GD</div>
+        <img src="/logo.svg" alt="GreenDavid" class="logo-img" />
         <div>
           <div style="font-weight:700">GreenDavid – Interní systém</div>
-          <div class="brand-sub">Zakázky • Zaměstnanci • Sklad • Fotky</div>
+          <div class="brand-sub">Zakázky • Zaměstnanci • Sklad</div>
         </div>
         <div class="right small" id="userbox"></div>
       </div>
     </header>
 
     <main class="container">
-      <noscript style="color:#fca5a5">Pro spuštění aplikace je potřeba JavaScript.</noscript>
       <div id="app"></div>
-      <p class="small">© <span id="year"></span> GreenDavid. Tmavé UI, vysoký kontrast, bez zeleného písma.</p>
     </main>
 
-    <!-- React & Babel (fixed versions) -->
+    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js" crossorigin></script>
 
-    <!-- App script transformed by Babel in the browser -->
     <script type="text/babel" data-presets="env,react">
       const { useState, useEffect, useMemo } = React;
 
       async function api(path, opts={}){
         const res = await fetch(path, {credentials:"same-origin", headers:{"Content-Type":"application/json"}, ...opts});
-        return res.json();
+        if(!res.ok){ try{ const j = await res.json(); throw new Error(j.error || res.statusText); } catch(e){ throw new Error(res.statusText); } }
+        try { return await res.json(); } catch { return {}; }
       }
-
       async function refreshUserBox(){
         const box = document.getElementById("userbox");
         try{
           const j = await api("/api/me");
           if(j.authenticated){
-            box.innerHTML = `Přihlášen: <b>${j.user.name}</b> (${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>`;
+            box.innerHTML = \`Přihlášen: <b>\${j.user.name}</b> (\${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>\`;
             document.getElementById("logout-btn").onclick = async ()=>{ await api("/api/logout",{method:"POST"}); location.reload(); };
           } else {
             box.innerHTML = '<span>Nepřihlášen</span>';
@@ -58,8 +55,10 @@
         async function submit(e){
           e.preventDefault();
           setErr("");
-          const j = await api("/api/login",{method:"POST", body: JSON.stringify({email, password:pass})});
-          if(j.ok){ onLogged(); } else { setErr("Špatný e‑mail nebo heslo"); }
+          try{
+            const j = await api("/api/login",{method:"POST", body: JSON.stringify({email, password:pass})});
+            if(j.ok!==false){ onLogged(); }
+          }catch(e){ setErr("Špatný e‑mail nebo heslo"); }
         }
         return (
           <div className="card" style={{maxWidth:420, margin:"40px auto"}}>
@@ -70,42 +69,188 @@
                 <div className="form-row"><input type="password" placeholder="Heslo" value={pass} onChange={e=>setPass(e.target.value)} required style={{flex:1}}/></div>
                 {err && <div className="small notice">{err}</div>}
                 <div className="form-row" style={{justifyContent:"flex-end"}}><button type="submit">Přihlásit</button></div>
-                <div className="small">Výchozí administrátor: <b>admin@greendavid.local</b> / <b>admin123</b> (změň po přihlášení).</div>
+                <div className="small">Výchozí admin: <b>admin@greendavid.local</b> / <b>admin123</b> (změň po přihlášení).</div>
               </form>
             </div>
           </div>
         );
       }
 
-      const EMPLOYEES=[
-        { id: "e1", name: "Jan Novák", role: "Zahradník" },
-        { id: "e2", name: "Pavla Svobodová", role: "Vedoucí týmu" },
-        { id: "e3", name: "Filip Horák", role: "Technik závlah" },
-      ];
-      const JOBS=[
-        { id: "z1", title: "Údržba parku – Kunice", client: "Obec Kunice", status: "Probíhá", city: "Kunice", code: "2025-091", date: "2025-10-03" },
-        { id: "z2", title: "Výsadba sadu – Lipník", client: "Soukromý investor", status: "Plán", city: "Lipník", code: "2025-087", date: "2025-10-06" },
-        { id: "z3", title: "Instalace závlah – Praha 6", client: "SVJ Bělohorská", status: "Dokončeno", city: "Praha", code: "2025-09-25" },
-      ];
-      const WAREHOUSE={
-        lipnik: {"Rostliny / Trvalky":[{id:"p1",name:"Nepeta 'Walker's Low'",qty:120,unit:"ks"},{id:"p2",name:"Heuchera mix",qty:80,unit:"ks"}],
-                 "Rostliny / Trávy":[{id:"p3",name:"Calamagrostis 'Karl Foerster'",qty:60,unit:"ks"}],
-                 "Rostliny / Keře":[{id:"p4",name:"Buxus sempervirens",qty:45,unit:"ks"}],
-                 "Rostliny / Stromy":[{id:"p5",name:"Pyrus 'Lucasova' 10-12",qty:12,unit:"ks"}],
-                 "Rostliny / Cibuloviny":[{id:"p6",name:"Tulipa 'Queen of Night'",qty:500,unit:"ks"}],
-                 "Hnojiva/Postřiky":[{id:"h1",name:"Kristalon Gold 25 kg",qty:6,unit:"ks"},{id:"h2",name:"Roundup Klasik 5 l",qty:2,unit:"ks"}],
-                 "Materiál zahrada":[{id:"mz1",name:"Textilie 90g 1,6×100 m",qty:5,unit:"role"}],
-                 "Materiál stavba":[{id:"ms1",name:"Štěrk fr. 4-8",qty:18,unit:"t"}],
-                 "Nářadí":[{id:"n1",name:"Motorová pila Stihl MS 261",qty:2,unit:"ks"}]},
-        praha:  {"Rostliny / Trvalky":[{id:"pp1",name:"Salvia nemorosa 'Caradonna'",qty:90,unit:"ks"}]}
-      };
+      function Tabs({value,onChange,canAdmin}){
+        const items=[
+          {key:"jobs",label:"Zakázky"},
+          {key:"employees",label:"Zaměstnanci"},
+          {key:"warehouse",label:"Sklad"},
+          ...(canAdmin?[{key:"users",label:"Uživatelé"}]:[]),
+        ];
+        return <div className="tabs">{items.map(it=>(
+          <div key={it.key} className={"tab"+(it.key===value?" active":"")} onClick={()=>onChange(it.key)}>{it.label}</div>
+        ))}</div>;
+      }
+
+      function Jobs(){
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({title:"",client:"",status:"Plán",city:"",code:"",date:""});
+        const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/jobs"); setList(j.jobs||[]); }catch(e){ setErr(e.message); } }
+        useEffect(()=>{ load(); },[]);
+        async function add(e){ e.preventDefault(); try{ await api("/api/jobs",{method:"POST",body:JSON.stringify(form)}); setForm({title:"",client:"",status:"Plán",city:"",code:"",date:""}); load(); }catch(e){ setErr(e.message);} }
+        async function del(id){ if(!confirm("Smazat zakázku?")) return; await api("/api/jobs?id="+id,{method:"DELETE"}); load(); }
+        async function setStatus(z, next){ await api("/api/jobs",{method:"PATCH",body:JSON.stringify({id:z.id,status:next})}); load(); }
+        const pipeline = (s)=>{ const order=["Plán","Probíhá","Dokončeno"]; const i=order.indexOf(s||"Plán"); return order[(i+1)%order.length]; };
+        return (
+          <div className="grid" style={{gridTemplateColumns:"1fr"}}>
+            <div className="card">
+              <div className="card-h"><div>Nová zakázka</div></div>
+              <div className="card-c">
+                <form onSubmit={add}>
+                  <div className="form-row">
+                    <input placeholder="Název" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} style={{flex:2}} required/>
+                    <input placeholder="Zákazník" value={form.client} onChange={e=>setForm({...form,client:e.target.value})} style={{flex:2}} required/>
+                    <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}>
+                      <option>Plán</option><option>Probíhá</option><option>Dokončeno</option>
+                    </select>
+                  </div>
+                  <div className="form-row">
+                    <input placeholder="Město" value={form.city} onChange={e=>setForm({...form,city:e.target.value})} required/>
+                    <input placeholder="Kód (např. 2025-091)" value={form.code} onChange={e=>setForm({...form,code:e.target.value})} required/>
+                    <input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} required/>
+                    <button type="submit">Přidat</button>
+                  </div>
+                </form>
+                {err && <div className="small notice">{err}</div>}
+              </div>
+            </div>
+
+            {list.map(z=> (
+              <div className="card" key={z.id}>
+                <div className="card-h">
+                  <div>
+                    <div style={{fontWeight:600}}>{z.title}</div>
+                    <div className="small">{z.client} • {z.city} • {z.code}</div>
+                  </div>
+                  <span className="badge">{z.status}</span>
+                </div>
+                <div className="card-c">
+                  <div className="kv small"><span>📅</span> <span>{z.date}</span></div>
+                  <div style={{marginTop:12, display:"flex", gap:8}}>
+                    <button onClick={()=> setStatus(z, pipeline(z.status))}>Posunout stav</button>
+                    <button className="ghost" onClick={()=> del(z.id)}>Smazat</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {list.length===0 && <div className="empty card"><div className="card-c">Zatím žádné zakázky – přidej první výše.</div></div>}
+          </div>
+        );
+      }
+
+      function Employees(){
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({name:"",role:"Zahradník"});
+        async function load(){ const j=await api("/api/employees"); setList(j.employees||[]); }
+        useEffect(()=>{ load(); },[]);
+        async function add(e){ e.preventDefault(); await api("/api/employees",{method:"POST",body:JSON.stringify(form)}); setForm({name:"",role:"Zahradník"}); load(); }
+        async function del(id){ if(!confirm("Smazat zaměstnance?")) return; await api("/api/employees?id="+id,{method:"DELETE"}); load(); }
+        return (
+          <div className="grid" style={{gridTemplateColumns:"1fr"}}>
+            <div className="card">
+              <div className="card-h"><div>Nový zaměstnanec</div></div>
+              <div className="card-c">
+                <form onSubmit={add}>
+                  <div className="form-row">
+                    <input placeholder="Jméno" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:1}}/>
+                    <input placeholder="Role (např. Zahradník)" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} required style={{flex:1}}/>
+                    <button type="submit">Přidat</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-h"><div>Seznam</div></div>
+              <div className="card-c">
+                <table className="table">
+                  <thead><tr><th>ID</th><th>Jméno</th><th>Role</th><th></th></tr></thead>
+                  <tbody>
+                    {list.map(e=>(
+                      <tr key={e.id}>
+                        <td>{e.id}</td><td>{e.name}</td><td>{e.role}</td>
+                        <td><button className="ghost" onClick={()=>del(e.id)}>Smazat</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {list.length===0 && <div className="empty card"><div className="card-c">Zatím žádní zaměstnanci – přidej prvního výše.</div></div>}
+          </div>
+        );
+      }
+
+      function Warehouse(){
+        const [site,setSite]=useState("lipnik");
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({category:"",name:"",qty:0,unit:"ks"});
+        const [q,setQ]=useState("");
+        async function load(){ const j=await api("/api/items?site="+site); setList(j.items||[]); }
+        useEffect(()=>{ load(); },[site]);
+        async function add(e){ e.preventDefault(); await api("/api/items",{method:"POST",body:JSON.stringify({...form,site})}); setForm({category:"",name:"",qty:0,unit:"ks"}); load(); }
+        async function del(id){ if(!confirm("Smazat položku?")) return; await api("/api/items?id="+id,{method:"DELETE"}); load(); }
+        const filtered = useMemo(()=> list.filter(r=> (r.name||"").toLowerCase().includes(q.toLowerCase())), [list,q]);
+        return (
+          <div>
+            <div style={{display:"flex",gap:8,alignItems:"center",margin:"8px 0 12px"}}>
+              <div className="tabs">
+                <div className={"tab"+(site==="lipnik"?" active":"")} onClick={()=>setSite("lipnik")}>Lipník</div>
+                <div className={"tab"+(site==="praha"?" active":"")} onClick={()=>setSite("praha")}>Praha</div>
+              </div>
+              <div className="search" style={{flex:1}}>
+                <input value={q} onChange={e=> setQ(e.target.value)} placeholder="Hledat položku…"/>
+                <button className="ghost">Hledat</button>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-h"><div>Nová položka</div></div>
+              <div className="card-c">
+                <form onSubmit={add}>
+                  <div className="form-row">
+                    <input placeholder="Kategorie" value={form.category} onChange={e=>setForm({...form,category:e.target.value})} required/>
+                    <input placeholder="Název" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:2}}/>
+                    <input type="number" step="0.01" placeholder="Množství" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})} required style={{width:120}}/>
+                    <input placeholder="Jedn." value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} required style={{width:80}}/>
+                    <button type="submit">Přidat</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-h"><div>Inventář – {site==="lipnik"?"Lipník":"Praha"}</div></div>
+              <div className="card-c">
+                <div className="row h"><div style={{gridColumn:"span 4"}}>Kategorie</div><div style={{gridColumn:"span 6"}}>Název</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Jedn.</div></div>
+                {filtered.length===0 && <div className="empty">Prázdné – přidej položky výše.</div>}
+                {filtered.map(r=> (
+                  <div className="row small" key={r.id}>
+                    <div style={{gridColumn:"span 4"}}>{r.category}</div>
+                    <div style={{gridColumn:"span 6"}}>{r.name}</div>
+                    <div style={{gridColumn:"span 1",textAlign:"right"}}>{r.qty}</div>
+                    <div style={{gridColumn:"span 1",textAlign:"right"}}>{r.unit}</div>
+                    <div style={{gridColumn:"span 12",textAlign:"right"}}><button className="ghost" onClick={()=>del(r.id)}>Smazat</button></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
 
       function UsersTab(){
         const [list,setList]=useState([]);
         const [form,setForm]=useState({email:"",name:"",role:"worker",password:""});
-        async function load(){ const j=await api("/api/users"); if(j.ok) setList(j.users); }
+        async function load(){ const j=await api("/api/users"); if(j.ok!==false) setList(j.users||[]); }
         useEffect(()=>{load()},[]);
-        async function create(e){ e.preventDefault(); const j=await api("/api/users",{method:"POST",body:JSON.stringify(form)}); if(j.ok){ setForm({email:"",name:"",role:"worker",password:""}); load(); } }
+        async function create(e){ e.preventDefault(); const j=await api("/api/users",{method:"POST",body:JSON.stringify(form)}); setForm({email:"",name:"",role:"worker",password:""}); load(); }
         async function setRole(id,role){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id,role})}); load(); }
         async function toggleActive(u){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id:u.id,active:!u.active})}); load(); }
         return (
@@ -114,8 +259,10 @@
               <div className="card-h"><div>Nový uživatel</div></div>
               <div className="card-c">
                 <form onSubmit={create}>
-                  <div className="form-row"><input placeholder="E‑mail" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required style={{flex:1}}/></div>
-                  <div className="form-row"><input placeholder="Jméno" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:1}}/></div>
+                  <div className="form-row">
+                    <input placeholder="E‑mail" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required style={{flex:1}}/>
+                    <input placeholder="Jméno" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:1}}/>
+                  </div>
                   <div className="form-row">
                     <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
                       <option value="worker">worker</option>
@@ -128,7 +275,6 @@
                 </form>
               </div>
             </div>
-
             <div className="card">
               <div className="card-h"><div>Uživatelé</div></div>
               <div className="card-c">
@@ -154,178 +300,27 @@
         );
       }
 
-      function Jobs(){
-        const [open, setOpen] = useState(null);
-        const [stage, setStage] = useState({});
-        const pipeline = (s)=>{ const order=["Plán","Probíhá","Dokončeno"]; const i=order.indexOf(s||"Plán"); return order[(i+1)%order.length]; };
-        function compress(e,maxSide=1200,quality=0.8, id){
-          const file = e.target.files?.[0]; if(!file) return;
-          const img = new Image();
-          const reader = new FileReader();
-          reader.onload = () => { img.src = reader.result; };
-          reader.readAsDataURL(file);
-          img.onload = () => {
-            const scale = (img.width>img.height) ? maxSide/img.width : maxSide/img.height;
-            const w = Math.round(img.width*scale);
-            const h = Math.round(img.height*scale);
-            const c = document.createElement("canvas");
-            c.width = w; c.height = h;
-            const ctx = c.getContext("2d");
-            ctx.drawImage(img,0,0,w,h);
-            const url = c.toDataURL("image/jpeg", quality);
-            const preview = document.getElementById("preview-"+id);
-            preview.innerHTML = "";
-            const im = document.createElement("img");
-            im.src = url; im.className="img-preview";
-            preview.appendChild(im);
-          };
-        }
-        function exportSection(){ window.print(); }
-        return (
-          <div className="grid" style={{gridTemplateColumns:"1fr 1fr"}}>
-            {JOBS.map(z=> (
-              <div className="card" key={z.id}>
-                <div className="card-h">
-                  <div>
-                    <div style={{fontWeight:600}}>{z.title}</div>
-                    <div className="small">{z.client} • {z.city} • {z.code}</div>
-                  </div>
-                  <span className="badge">{stage[z.id]||z.status}</span>
-                </div>
-                <div className="card-c">
-                  <div className="kv small"><span>📅</span> <span>{z.date}</span></div>
-                  <hr/>
-                  <button className="ghost" onClick={()=> setOpen(open===z.id? null : z.id)}>
-                    {open===z.id? "Skrýt detail" : "Zobrazit detail"}
-                  </button>
-                  {open===z.id && (
-                    <div style={{marginTop:12}}>
-                      <div className="card" style={{marginBottom:12}}>
-                        <div className="card-h"><div>Materiál</div><button>Přidat položku</button></div>
-                        <div className="card-c small">
-                          <div className="row h"><div style={{gridColumn:"span 6"}}>Název</div><div style={{gridColumn:"span 3",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 2"}}>Jedn.</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Akce</div></div>
-                          <div className="row"><div style={{gridColumn:"span 6"}}>Mulčovací kůra 70 l</div><div style={{gridColumn:"span 3",textAlign:"right"}}>30</div><div style={{gridColumn:"span 2"}}>ks</div><div style={{gridColumn:"span 1",textAlign:"right"}}>—</div></div>
-                          <div className="row"><div style={{gridColumn:"span 6"}}>PE hadice 16 mm</div><div style={{gridColumn:"span 3",textAlign:"right"}}>120</div><div style={{gridColumn:"span 2"}}>m</div><div style={{gridColumn:"span 1",textAlign:"right"}}>—</div></div>
-                        </div>
-                      </div>
-
-                      <div className="card" style={{marginBottom:12}}>
-                        <div className="card-h"><div>Nářadí</div><button>Přidat položku</button></div>
-                        <div className="card-c small">
-                          <div className="row"><div style={{gridColumn:"span 9"}}>Vibrační deska 100 kg</div><div style={{gridColumn:"span 3",textAlign:"right"}}>1 ks</div></div>
-                          <div className="row"><div style={{gridColumn:"span 9"}}>Vrtací kladivo SDS‑Max</div><div style={{gridColumn:"span 3",textAlign:"right"}}>1 ks</div></div>
-                        </div>
-                      </div>
-
-                      <div className="card">
-                        <div className="card-h"><div>Fotodokumentace</div></div>
-                        <div className="card-c">
-                          <p className="small">Nahrané fotky se automaticky zmenší na max. 1200 px (JPEG) pro rychlé načítání.</p>
-                          <label><input id={"file-"+z.id} type="file" accept="image/*" onChange={(e)=>compress(e,1200,0.8,z.id)}/><button className="ghost">Nahrát fotku</button></label>
-                          <div id={"preview-"+z.id} style={{marginTop:12}}></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  <div style={{marginTop:12, display:"flex", gap:8}}>
-                    <button onClick={()=> setStage(s=>({...s,[z.id]: pipeline(s[z.id]||z.status)}))}>Posunout stav</button>
-                    <button className="ghost" onClick={exportSection}>Export PDF náhledu</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        );
-      }
-
-      function Employees(){
-        const [q, setQ] = useState("");
-        const [open, setOpen] = useState(null);
-        const filtered = useMemo(()=> EMPLOYEES.filter(e=> (e.name.toLowerCase().includes(q.toLowerCase()))), [q]);
-        const times = {
-          e1:[{date:"2025-10-01",hours:8,job:"Údržba parku – Kunice"},{date:"2025-10-02",hours:6,job:"Instalace závlah – Praha 6"}],
-          e2:[{date:"2025-10-02",hours:9,job:"Výsadba sadu – Lipník"}],
-          e3:[{date:"2025-10-03",hours:7.5,job:"Instalace závlah – Praha 6"}],
-        };
-        return (
-          <div>
-            <div className="search" style={{margin:"8px 0 12px"}}>
-              <input value={q} onChange={e=> setQ(e.target.value)} placeholder="Hledat jméno…"/>
-              <button className="ghost">Hledat</button>
-            </div>
-            <div className="grid" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
-              {filtered.map(e=> (
-                <div className="card" key={e.id}>
-                  <div className="card-h">
-                    <div style={{fontWeight:600}}>{e.name}</div>
-                    <span className="badge">{e.role}</span>
-                  </div>
-                  <div className="card-c">
-                    <div className="small mono">ID: {e.id.toUpperCase()}</div>
-                    <button className="ghost" style={{marginTop:8}} onClick={()=> setOpen(open===e.id? null : e.id)}>
-                      {open===e.id? "Skrýt výkazy" : "Zobrazit výkazy"}
-                    </button>
-                    {open===e.id && (
-                      <div style={{marginTop:12}}>
-                        <div className="row h"><div style={{gridColumn:"span 4"}}>Den</div><div style={{gridColumn:"span 2",textAlign:"right"}}>Hod</div><div style={{gridColumn:"span 6"}}>Zakázka</div></div>
-                        {(times[e.id]||[]).map((r,i)=> (
-                          <div className="row small" key={i}><div style={{gridColumn:"span 4"}}>{r.date}</div><div style={{gridColumn:"span 2",textAlign:"right"}}>{r.hours}</div><div style={{gridColumn:"span 6"}}>{r.job}</div></div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      }
-
-      function Settings(){
-        return (
-          <div className="card">
-            <div className="card-c">
-              <div className="row small"><div style={{gridColumn:"span 12"}}><b>Vzhled:</b> vysoký kontrast, tmavé pozadí, světlé písmo. Žádné zelené písmo.</div></div>
-              <div className="row small"><div style={{gridColumn:"span 12"}}><b>Export:</b> „Export PDF náhledu“ otevře tiskový dialog (uložíš jako PDF).</div></div>
-            </div>
-          </div>
-        );
-      }
-
       function App(){
         const [auth,setAuth]=useState({ready:false, ok:false, user:null});
         const [tab, setTab] = useState("jobs");
-        useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); console.log("App mounted"); })()},[]);
+        useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); })()},[]);
         if(!auth.ready) return <div className="small">Načítám…</div>;
         if(!auth.ok) return <Login onLogged={()=>location.reload()}/>;
-        const canAdmin = auth.user?.role==="admin";
+        const canAdmin = auth.user?.role!=="worker";
         return (
           <div>
-            <div className="tabs">
-              <div className={"tab"+(tab==="jobs"?" active":"")} onClick={()=>setTab("jobs")}>Zakázky</div>
-              <div className={"tab"+(tab==="employees"?" active":"")} onClick={()=>setTab("employees")}>Zaměstnanci</div>
-              <div className={"tab"+(tab==="warehouse"?" active":"")} onClick={()=>setTab("warehouse")}>Sklad</div>
-              {canAdmin && <div className={"tab"+(tab==="users"?" active":"")} onClick={()=>setTab("users")}>Uživatelé</div>}
-              <div className={"tab"+(tab==="settings"?" active":"")} onClick={()=>setTab("settings")}>Nastavení</div>
-            </div>
+            <Tabs value={tab} onChange={setTab} canAdmin={auth.user?.role==="admin"}/>
             <div style={{height:12}}/>
             {tab==="jobs" && <Jobs/>}
             {tab==="employees" && <Employees/>}
             {tab==="warehouse" && <Warehouse/>}
-            {tab==="users" && canAdmin && <UsersTab/>}
-            {tab==="settings" && <Settings/>}
+            {tab==="users" && auth.user?.role==="admin" && <UsersTab/>}
+            <p className="small" style={{marginTop:14}}>© {new Date().getFullYear()} GreenDavid</p>
           </div>
         );
       }
 
-      try{
-        ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
-        document.getElementById("year").textContent = new Date().getFullYear();
-      } catch(e){
-        const a = document.getElementById("app");
-        a.innerHTML = '<div class="small" style="color:#fca5a5">Chyba při startu aplikace. Zkuste obnovit stránku.</div>';
-        console.error(e);
-      }
+      ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
     </script>
   </body>
 </html>
