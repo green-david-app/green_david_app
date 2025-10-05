@@ -7,7 +7,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 DB_PATH = os.environ.get("DB_PATH", "app.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-" + os.urandom(16).hex())
 
-# Serve static files from repo root
 app = Flask(__name__, static_folder=".", static_url_path="")
 app.secret_key = SECRET_KEY
 
@@ -38,7 +37,6 @@ def init_db():
         )
     """)
     db.commit()
-    # seed default admin
     c.execute("SELECT COUNT(*) as c FROM users")
     if c.fetchone()["c"] == 0:
         c.execute("""INSERT INTO users(email,name,role,password_hash,active,created_at)
@@ -95,7 +93,6 @@ def api_login():
     password = data.get("password") or ""
     db = get_db()
     row = db.execute("SELECT id,email,name,role,password_hash,active FROM users WHERE email=?", (email,)).fetchone()
-    from werkzeug.security import check_password_hash
     if not row or not check_password_hash(row["password_hash"], password) or not row["active"]:
         return jsonify({"ok": False, "error": "invalid_credentials"}), 401
     session["uid"] = row["id"]
@@ -123,7 +120,6 @@ def api_users():
         if not (email and name and pwd and role in ("admin","manager","worker")):
             return jsonify({"ok": False, "error":"invalid_input"}), 400
         try:
-            from werkzeug.security import generate_password_hash
             db.execute("""INSERT INTO users(email,name,role,password_hash,active,created_at)
                           VALUES (?,?,?,?,1,?)""",
                        (email, name, role, generate_password_hash(pwd), datetime.utcnow().isoformat()))
@@ -141,7 +137,6 @@ def api_users():
         if "active" in data:
             updates.append("active=?"); params.append(1 if data["active"] else 0)
         if "password" in data and data["password"]:
-            from werkzeug.security import generate_password_hash
             updates.append("password_hash=?"); params.append(generate_password_hash(data["password"]))
         if not uid or not updates:
             return jsonify({"ok": False, "error":"invalid_input"}), 400

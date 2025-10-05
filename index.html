@@ -43,7 +43,7 @@
         try{
           const j = await api("/api/me");
           if(j.authenticated){
-            box.innerHTML = \`Přihlášen: <b>\${j.user.name}</b> (\${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>\`;
+            box.innerHTML = `Přihlášen: <b>${j.user.name}</b> (${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>`;
             document.getElementById("logout-btn").onclick = async ()=>{ await api("/api/logout",{method:"POST"}); location.reload(); };
           } else {
             box.innerHTML = '<span>Nepřihlášen</span>';
@@ -85,7 +85,7 @@
       const JOBS=[
         { id: "z1", title: "Údržba parku – Kunice", client: "Obec Kunice", status: "Probíhá", city: "Kunice", code: "2025-091", date: "2025-10-03" },
         { id: "z2", title: "Výsadba sadu – Lipník", client: "Soukromý investor", status: "Plán", city: "Lipník", code: "2025-087", date: "2025-10-06" },
-        { id: "z3", title: "Instalace závlah – Praha 6", client: "SVJ Bělohorská", status: "Dokončeno", city: "Praha", code: "2025-072", date: "2025-09-25" },
+        { id: "z3", title: "Instalace závlah – Praha 6", client: "SVJ Bělohorská", status: "Dokončeno", city: "Praha", code: "2025-09-25" },
       ];
       const WAREHOUSE={
         lipnik: {"Rostliny / Trvalky":[{id:"p1",name:"Nepeta 'Walker's Low'",qty:120,unit:"ks"},{id:"p2",name:"Heuchera mix",qty:80,unit:"ks"}],
@@ -101,10 +101,10 @@
       };
 
       function UsersTab(){
-        const [list,setList]=React.useState([]);
-        const [form,setForm]=React.useState({email:"",name:"",role:"worker",password:""});
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({email:"",name:"",role:"worker",password:""});
         async function load(){ const j=await api("/api/users"); if(j.ok) setList(j.users); }
-        React.useEffect(()=>{load()},[]);
+        useEffect(()=>{load()},[]);
         async function create(e){ e.preventDefault(); const j=await api("/api/users",{method:"POST",body:JSON.stringify(form)}); if(j.ok){ setForm({email:"",name:"",role:"worker",password:""}); load(); } }
         async function setRole(id,role){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id,role})}); load(); }
         async function toggleActive(u){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id:u.id,active:!u.active})}); load(); }
@@ -154,9 +154,9 @@
         );
       }
 
-      function Jobs(){ /* same as v11 */ 
-        const [open, setOpen] = React.useState(null);
-        const [stage, setStage] = React.useState({});
+      function Jobs(){
+        const [open, setOpen] = useState(null);
+        const [stage, setStage] = useState({});
         const pipeline = (s)=>{ const order=["Plán","Probíhá","Dokončeno"]; const i=order.indexOf(s||"Plán"); return order[(i+1)%order.length]; };
         function compress(e,maxSide=1200,quality=0.8, id){
           const file = e.target.files?.[0]; if(!file) return;
@@ -208,6 +208,7 @@
                           <div className="row"><div style={{gridColumn:"span 6"}}>PE hadice 16 mm</div><div style={{gridColumn:"span 3",textAlign:"right"}}>120</div><div style={{gridColumn:"span 2"}}>m</div><div style={{gridColumn:"span 1",textAlign:"right"}}>—</div></div>
                         </div>
                       </div>
+
                       <div className="card" style={{marginBottom:12}}>
                         <div className="card-h"><div>Nářadí</div><button>Přidat položku</button></div>
                         <div className="card-c small">
@@ -215,6 +216,7 @@
                           <div className="row"><div style={{gridColumn:"span 9"}}>Vrtací kladivo SDS‑Max</div><div style={{gridColumn:"span 3",textAlign:"right"}}>1 ks</div></div>
                         </div>
                       </div>
+
                       <div className="card">
                         <div className="card-h"><div>Fotodokumentace</div></div>
                         <div className="card-c">
@@ -236,10 +238,10 @@
         );
       }
 
-      function Employees(){ /* same as v11 */ 
-        const [q, setQ] = React.useState("");
-        const [open, setOpen] = React.useState(null);
-        const filtered = React.useMemo(()=> EMPLOYEES.filter(e=> (e.name.toLowerCase().includes(q.toLowerCase()))), [q]);
+      function Employees(){
+        const [q, setQ] = useState("");
+        const [open, setOpen] = useState(null);
+        const filtered = useMemo(()=> EMPLOYEES.filter(e=> (e.name.toLowerCase().includes(q.toLowerCase()))), [q]);
         const times = {
           e1:[{date:"2025-10-01",hours:8,job:"Údržba parku – Kunice"},{date:"2025-10-02",hours:6,job:"Instalace závlah – Praha 6"}],
           e2:[{date:"2025-10-02",hours:9,job:"Výsadba sadu – Lipník"}],
@@ -263,7 +265,7 @@
                     <button className="ghost" style={{marginTop:8}} onClick={()=> setOpen(open===e.id? null : e.id)}>
                       {open===e.id? "Skrýt výkazy" : "Zobrazit výkazy"}
                     </button>
-                    {open===e.id and (
+                    {open===e.id && (
                       <div style={{marginTop:12}}>
                         <div className="row h"><div style={{gridColumn:"span 4"}}>Den</div><div style={{gridColumn:"span 2",textAlign:"right"}}>Hod</div><div style={{gridColumn:"span 6"}}>Zakázka</div></div>
                         {(times[e.id]||[]).map((r,i)=> (
@@ -291,9 +293,9 @@
       }
 
       function App(){
-        const [auth,setAuth]=React.useState({ready:false, ok:false, user:null});
-        const [tab, setTab] = React.useState("jobs");
-        React.useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); console.log("App mounted"); })()},[]);
+        const [auth,setAuth]=useState({ready:false, ok:false, user:null});
+        const [tab, setTab] = useState("jobs");
+        useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); console.log("App mounted"); })()},[]);
         if(!auth.ready) return <div className="small">Načítám…</div>;
         if(!auth.ok) return <Login onLogged={()=>location.reload()}/>;
         const canAdmin = auth.user?.role==="admin";
