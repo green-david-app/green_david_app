@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <title>green david app</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>🌿 green david app</header>
+
+    <main>
+        <section>
+            <h2>👷 Zaměstnanci</h2>
+            <ul>
+                {% for z in zamestnanci %}
+                <li>{{ z.jmeno }} – {{ z.pozice or "neuvedeno" }}</li>
+                {% else %}
+                <li>Žádní zaměstnanci zatím nejsou.</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section>
+            <h2>📋 Zakázky</h2>
+            <ul>
+                {% for p in zakazky %}
+                <li>{{ p.nazev }} – {{ p.zakaznik or "bez zákazníka" }}</li>
+                {% else %}
+                <li>Žádné zakázky zatím nejsou.</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section>
+            <h2>📦 Sklad</h2>
+            <ul>
+                {% for i in polozky %}
+                <li>{{ i.nazev }} – {{ i.mnozstvi }} {{ i.jednotka }}</li>
+                {% else %}
+                <li>Žádné položky zatím nejsou.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </main>
+
+    <footer>© green david s.r.o.</footer>
+</body>
+</html>
