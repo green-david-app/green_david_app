@@ -19,16 +19,18 @@
     </header>
 
     <main class="container">
+      <noscript style="color:#fca5a5">Pro spuštění aplikace je potřeba JavaScript.</noscript>
       <div id="app"></div>
       <p class="small">© <span id="year"></span> GreenDavid. Tmavé UI, vysoký kontrast, bez zeleného písma.</p>
     </main>
 
-    <!-- React & Babel -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- React & Babel (fixed versions) -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js" crossorigin></script>
 
-    <script type="text/babel">
+    <!-- App script transformed by Babel in the browser -->
+    <script type="text/babel" data-presets="env,react">
       const { useState, useEffect, useMemo } = React;
 
       async function api(path, opts={}){
@@ -99,10 +101,10 @@
       };
 
       function UsersTab(){
-        const [list,setList]=useState([]);
-        const [form,setForm]=useState({email:"",name:"",role:"worker",password:""});
+        const [list,setList]=React.useState([]);
+        const [form,setForm]=React.useState({email:"",name:"",role:"worker",password:""});
         async function load(){ const j=await api("/api/users"); if(j.ok) setList(j.users); }
-        useEffect(()=>{load()},[]);
+        React.useEffect(()=>{load()},[]);
         async function create(e){ e.preventDefault(); const j=await api("/api/users",{method:"POST",body:JSON.stringify(form)}); if(j.ok){ setForm({email:"",name:"",role:"worker",password:""}); load(); } }
         async function setRole(id,role){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id,role})}); load(); }
         async function toggleActive(u){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id:u.id,active:!u.active})}); load(); }
@@ -152,9 +154,9 @@
         );
       }
 
-      function Jobs(){
-        const [open, setOpen] = useState(null);
-        const [stage, setStage] = useState({});
+      function Jobs(){ /* same as v11 */ 
+        const [open, setOpen] = React.useState(null);
+        const [stage, setStage] = React.useState({});
         const pipeline = (s)=>{ const order=["Plán","Probíhá","Dokončeno"]; const i=order.indexOf(s||"Plán"); return order[(i+1)%order.length]; };
         function compress(e,maxSide=1200,quality=0.8, id){
           const file = e.target.files?.[0]; if(!file) return;
@@ -206,7 +208,6 @@
                           <div className="row"><div style={{gridColumn:"span 6"}}>PE hadice 16 mm</div><div style={{gridColumn:"span 3",textAlign:"right"}}>120</div><div style={{gridColumn:"span 2"}}>m</div><div style={{gridColumn:"span 1",textAlign:"right"}}>—</div></div>
                         </div>
                       </div>
-
                       <div className="card" style={{marginBottom:12}}>
                         <div className="card-h"><div>Nářadí</div><button>Přidat položku</button></div>
                         <div className="card-c small">
@@ -214,7 +215,6 @@
                           <div className="row"><div style={{gridColumn:"span 9"}}>Vrtací kladivo SDS‑Max</div><div style={{gridColumn:"span 3",textAlign:"right"}}>1 ks</div></div>
                         </div>
                       </div>
-
                       <div className="card">
                         <div className="card-h"><div>Fotodokumentace</div></div>
                         <div className="card-c">
@@ -236,10 +236,10 @@
         );
       }
 
-      function Employees(){
-        const [q, setQ] = useState("");
-        const [open, setOpen] = useState(null);
-        const filtered = useMemo(()=> EMPLOYEES.filter(e=> (e.name.toLowerCase().includes(q.toLowerCase()))), [q]);
+      function Employees(){ /* same as v11 */ 
+        const [q, setQ] = React.useState("");
+        const [open, setOpen] = React.useState(null);
+        const filtered = React.useMemo(()=> EMPLOYEES.filter(e=> (e.name.toLowerCase().includes(q.toLowerCase()))), [q]);
         const times = {
           e1:[{date:"2025-10-01",hours:8,job:"Údržba parku – Kunice"},{date:"2025-10-02",hours:6,job:"Instalace závlah – Praha 6"}],
           e2:[{date:"2025-10-02",hours:9,job:"Výsadba sadu – Lipník"}],
@@ -263,7 +263,7 @@
                     <button className="ghost" style={{marginTop:8}} onClick={()=> setOpen(open===e.id? null : e.id)}>
                       {open===e.id? "Skrýt výkazy" : "Zobrazit výkazy"}
                     </button>
-                    {open===e.id && (
+                    {open===e.id and (
                       <div style={{marginTop:12}}>
                         <div className="row h"><div style={{gridColumn:"span 4"}}>Den</div><div style={{gridColumn:"span 2",textAlign:"right"}}>Hod</div><div style={{gridColumn:"span 6"}}>Zakázka</div></div>
                         {(times[e.id]||[]).map((r,i)=> (
@@ -274,39 +274,6 @@
                   </div>
                 </div>
               ))}
-            </div>
-          </div>
-        );
-      }
-
-      function Warehouse(){
-        const [site, setSite] = useState("lipnik");
-        const [q, setQ] = useState("");
-        const data = WAREHOUSE[site];
-        const rows = [];
-        Object.entries(data||{}).forEach(([cat,items])=>{ (items||[]).forEach(it=> rows.push({...it, path:cat})); });
-        const filtered = rows.filter(r=> r.name.toLowerCase().includes(q.toLowerCase()));
-        return (
-          <div>
-            <div style={{display:"flex",gap:8,alignItems:"center",margin:"8px 0 12px"}}>
-              <div className="tabs">
-                <div className={"tab"+(site==="lipnik"?" active":"")} onClick={()=>setSite("lipnik")}>Lipník</div>
-                <div className={"tab"+(site==="praha"?" active":"")} onClick={()=>setSite("praha")}>Praha</div>
-              </div>
-              <div className="search" style={{flex:1}}>
-                <input value={q} onChange={e=> setQ(e.target.value)} placeholder="Hledat položku…"/>
-                <button className="ghost">Hledat</button>
-              </div>
-              <button>Nová položka</button>
-            </div>
-            <div className="card">
-              <div className="card-c">
-                <div className="row h"><div style={{gridColumn:"span 4"}}>Kategorie</div><div style={{gridColumn:"span 5"}}>Název</div><div style={{gridColumn:"span 2",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Jedn.</div></div>
-                {filtered.length===0 && <div className="empty">Nic nenalezeno…</div>}
-                {filtered.map(r=> (
-                  <div className="row small" key={r.id}><div style={{gridColumn:"span 4"}}>{r.path}</div><div style={{gridColumn:"span 5"}}>{r.name}</div><div style={{gridColumn:"span 2",textAlign:"right"}}>{r.qty}</div><div style={{gridColumn:"span 1",textAlign:"right"}}>{r.unit}</div></div>
-                ))}
-              </div>
             </div>
           </div>
         );
@@ -324,9 +291,9 @@
       }
 
       function App(){
-        const [auth,setAuth]=useState({ready:false, ok:false, user:null});
-        const [tab, setTab] = useState("jobs");
-        useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); })()},[]);
+        const [auth,setAuth]=React.useState({ready:false, ok:false, user:null});
+        const [tab, setTab] = React.useState("jobs");
+        React.useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); console.log("App mounted"); })()},[]);
         if(!auth.ready) return <div className="small">Načítám…</div>;
         if(!auth.ok) return <Login onLogged={()=>location.reload()}/>;
         const canAdmin = auth.user?.role==="admin";
@@ -349,8 +316,14 @@
         );
       }
 
-      ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
-      document.getElementById("year").textContent = new Date().getFullYear();
+      try{
+        ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
+        document.getElementById("year").textContent = new Date().getFullYear();
+      } catch(e){
+        const a = document.getElementById("app");
+        a.innerHTML = '<div class="small" style="color:#fca5a5">Chyba při startu aplikace. Zkuste obnovit stránku.</div>';
+        console.error(e);
+      }
     </script>
   </body>
 </html>

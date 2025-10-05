@@ -7,7 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 DB_PATH = os.environ.get("DB_PATH", "app.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-" + os.urandom(16).hex())
 
-# Serve static files directly from repo root (no /static folder)
+# Serve static files from repo root
 app = Flask(__name__, static_folder=".", static_url_path="")
 app.secret_key = SECRET_KEY
 
@@ -38,17 +38,15 @@ def init_db():
         )
     """)
     db.commit()
-    # seed default admin if not exists
+    # seed default admin
     c.execute("SELECT COUNT(*) as c FROM users")
-    count = c.fetchone()["c"]
-    if count == 0:
-        admin_email = os.environ.get("ADMIN_EMAIL", "admin@greendavid.local")
-        admin_name = os.environ.get("ADMIN_NAME", "Admin")
-        admin_pwd = os.environ.get("ADMIN_PASSWORD", "admin123")
+    if c.fetchone()["c"] == 0:
         c.execute("""INSERT INTO users(email,name,role,password_hash,active,created_at)
                      VALUES (?,?,?,?,1,?)""",
-                  (admin_email, admin_name, "admin",
-                   generate_password_hash(admin_pwd),
+                  (os.environ.get("ADMIN_EMAIL","admin@greendavid.local"),
+                   os.environ.get("ADMIN_NAME","Admin"),
+                   "admin",
+                   generate_password_hash(os.environ.get("ADMIN_PASSWORD","admin123")),
                    datetime.utcnow().isoformat()))
         db.commit()
 
@@ -56,7 +54,6 @@ def init_db():
 def ensure_db():
     init_db()
 
-# -------- Routes --------
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
@@ -65,16 +62,13 @@ def index():
 def health():
     return {"status": "ok"}
 
-# -------- Helpers --------
 def current_user():
     uid = session.get("uid")
     if not uid:
         return None
     db = get_db()
     row = db.execute("SELECT id,email,name,role,active FROM users WHERE id=?",(uid,)).fetchone()
-    if not row:
-        return None
-    return dict(row)
+    return dict(row) if row else None
 
 def require_auth():
     u = current_user()
@@ -89,13 +83,10 @@ def require_admin():
         return None, (jsonify({"ok": False, "error": "forbidden"}), 403)
     return u, None
 
-# -------- API: auth --------
-@app.route("/api/me", methods=["GET"])
+@app.route("/api/me")
 def api_me():
     u = current_user()
-    if not u:
-        return jsonify({"ok": True, "authenticated": False})
-    return jsonify({"ok": True, "authenticated": True, "user": u})
+    return jsonify({"ok": True, "authenticated": bool(u), "user": u})
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
@@ -104,6 +95,7 @@ def api_login():
     password = data.get("password") or ""
     db = get_db()
     row = db.execute("SELECT id,email,name,role,password_hash,active FROM users WHERE email=?", (email,)).fetchone()
+    from werkzeug.security import check_password_hash
     if not row or not check_password_hash(row["password_hash"], password) or not row["active"]:
         return jsonify({"ok": False, "error": "invalid_credentials"}), 401
     session["uid"] = row["id"]
@@ -114,7 +106,6 @@ def api_logout():
     session.pop("uid", None)
     return jsonify({"ok": True})
 
-# -------- API: users (admin only) --------
 @app.route("/api/users", methods=["GET","POST","PATCH"])
 def api_users():
     admin, err = require_admin()
@@ -132,6 +123,7 @@ def api_users():
         if not (email and name and pwd and role in ("admin","manager","worker")):
             return jsonify({"ok": False, "error":"invalid_input"}), 400
         try:
+            from werkzeug.security import generate_password_hash
             db.execute("""INSERT INTO users(email,name,role,password_hash,active,created_at)
                           VALUES (?,?,?,?,1,?)""",
                        (email, name, role, generate_password_hash(pwd), datetime.utcnow().isoformat()))
@@ -141,8 +133,7 @@ def api_users():
             return jsonify({"ok": False, "error":"email_exists"}), 400
     if request.method == "PATCH":
         uid = data.get("id")
-        updates = []
-        params = []
+        updates = []; params = []
         if "role" in data:
             if data["role"] not in ("admin","manager","worker"):
                 return jsonify({"ok": False, "error":"bad_role"}), 400
@@ -150,6 +141,7 @@ def api_users():
         if "active" in data:
             updates.append("active=?"); params.append(1 if data["active"] else 0)
         if "password" in data and data["password"]:
+            from werkzeug.security import generate_password_hash
             updates.append("password_hash=?"); params.append(generate_password_hash(data["password"]))
         if not uid or not updates:
             return jsonify({"ok": False, "error":"invalid_input"}), 400
