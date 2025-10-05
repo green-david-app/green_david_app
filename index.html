@@ -14,10 +14,7 @@
           <div style="font-weight:700">GreenDavid – Interní systém</div>
           <div class="brand-sub">Zakázky • Zaměstnanci • Sklad • Fotky</div>
         </div>
-        <div style="margin-left:auto" class="search">
-          <input id="globalsearch" type="search" placeholder="Hledat…"/>
-          <button onclick="document.getElementById('globalsearch').focus()">Hledat</button>
-        </div>
+        <div class="right small" id="userbox"></div>
       </div>
     </header>
 
@@ -26,94 +23,162 @@
       <p class="small">© <span id="year"></span> GreenDavid. Tmavé UI, vysoký kontrast, bez zeleného písma.</p>
     </main>
 
-    <!-- React & Babel (no build) -->
+    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script type="text/babel">
-      const { useState, useMemo } = React;
+      const { useState, useEffect, useMemo } = React;
 
-      // Fakta / seed data
-      const EMPLOYEES = [
+      async function api(path, opts={}){
+        const res = await fetch(path, {credentials:"same-origin", headers:{"Content-Type":"application/json"}, ...opts});
+        return res.json();
+      }
+
+      async function refreshUserBox(){
+        const box = document.getElementById("userbox");
+        try{
+          const j = await api("/api/me");
+          if(j.authenticated){
+            box.innerHTML = \`Přihlášen: <b>\${j.user.name}</b> (\${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>\`;
+            document.getElementById("logout-btn").onclick = async ()=>{ await api("/api/logout",{method:"POST"}); location.reload(); };
+          } else {
+            box.innerHTML = '<span>Nepřihlášen</span>';
+          }
+        }catch(e){ box.innerText = ""; }
+      }
+
+      function Login({onLogged}){
+        const [email,setEmail]=useState("");
+        const [pass,setPass]=useState("");
+        const [err,setErr]=useState("");
+        async function submit(e){
+          e.preventDefault();
+          setErr("");
+          const j = await api("/api/login",{method:"POST", body: JSON.stringify({email, password:pass})});
+          if(j.ok){ onLogged(); } else { setErr("Špatný e‑mail nebo heslo"); }
+        }
+        return (
+          <div className="card" style={{maxWidth:420, margin:"40px auto"}}>
+            <div className="card-h"><div>Přihlášení</div></div>
+            <div className="card-c">
+              <form onSubmit={submit}>
+                <div className="form-row"><input type="email" placeholder="E‑mail" value={email} onChange={e=>setEmail(e.target.value)} required style={{flex:1}}/></div>
+                <div className="form-row"><input type="password" placeholder="Heslo" value={pass} onChange={e=>setPass(e.target.value)} required style={{flex:1}}/></div>
+                {err && <div className="small notice">{err}</div>}
+                <div className="form-row" style={{justifyContent:"flex-end"}}><button type="submit">Přihlásit</button></div>
+                <div className="small">Výchozí administrátor: <b>admin@greendavid.local</b> / <b>admin123</b> (změň po přihlášení).</div>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
+      const EMPLOYEES=[
         { id: "e1", name: "Jan Novák", role: "Zahradník" },
         { id: "e2", name: "Pavla Svobodová", role: "Vedoucí týmu" },
         { id: "e3", name: "Filip Horák", role: "Technik závlah" },
       ];
-      const JOBS = [
+      const JOBS=[
         { id: "z1", title: "Údržba parku – Kunice", client: "Obec Kunice", status: "Probíhá", city: "Kunice", code: "2025-091", date: "2025-10-03" },
         { id: "z2", title: "Výsadba sadu – Lipník", client: "Soukromý investor", status: "Plán", city: "Lipník", code: "2025-087", date: "2025-10-06" },
         { id: "z3", title: "Instalace závlah – Praha 6", client: "SVJ Bělohorská", status: "Dokončeno", city: "Praha", code: "2025-072", date: "2025-09-25" },
       ];
-      const WAREHOUSE = {
-        site: "lipnik",
-        lipnik: {
-          "Rostliny / Trvalky": [
-            { id:"p1", name:"Nepeta 'Walker's Low'", qty:120, unit:"ks" },
-            { id:"p2", name:"Heuchera mix", qty:80, unit:"ks" },
-          ],
-          "Rostliny / Trávy": [
-            { id:"p3", name:"Calamagrostis 'Karl Foerster'", qty:60, unit:"ks" },
-          ],
-          "Rostliny / Keře": [
-            { id:"p4", name:"Buxus sempervirens", qty:45, unit:"ks" },
-          ],
-          "Rostliny / Stromy": [
-            { id:"p5", name:"Pyrus 'Lucasova' 10-12", qty:12, unit:"ks" },
-          ],
-          "Rostliny / Cibuloviny": [
-            { id:"p6", name:"Tulipa 'Queen of Night'", qty:500, unit:"ks" },
-          ],
-          "Hnojiva/Postřiky": [
-            { id:"h1", name:"Kristalon Gold 25 kg", qty:6, unit:"ks" },
-            { id:"h2", name:"Roundup Klasik 5 l", qty:2, unit:"ks" },
-          ],
-          "Materiál zahrada": [
-            { id:"mz1", name:"Textilie 90g 1,6×100 m", qty:5, unit:"role" },
-          ],
-          "Materiál stavba": [
-            { id:"ms1", name:"Štěrk fr. 4-8", qty:18, unit:"t" },
-          ],
-          "Nářadí": [
-            { id:"n1", name:"Motorová pila Stihl MS 261", qty:2, unit:"ks" },
-          ]
-        },
-        praha: {
-          "Rostliny / Trvalky": [
-            { id:"pp1", name:"Salvia nemorosa 'Caradonna'", qty:90, unit:"ks" },
-          ]
-        }
+      const WAREHOUSE={
+        lipnik: {"Rostliny / Trvalky":[{id:"p1",name:"Nepeta 'Walker's Low'",qty:120,unit:"ks"},{id:"p2",name:"Heuchera mix",qty:80,unit:"ks"}],
+                 "Rostliny / Trávy":[{id:"p3",name:"Calamagrostis 'Karl Foerster'",qty:60,unit:"ks"}],
+                 "Rostliny / Keře":[{id:"p4",name:"Buxus sempervirens",qty:45,unit:"ks"}],
+                 "Rostliny / Stromy":[{id:"p5",name:"Pyrus 'Lucasova' 10-12",qty:12,unit:"ks"}],
+                 "Rostliny / Cibuloviny":[{id:"p6",name:"Tulipa 'Queen of Night'",qty:500,unit:"ks"}],
+                 "Hnojiva/Postřiky":[{id:"h1",name:"Kristalon Gold 25 kg",qty:6,unit:"ks"},{id:"h2",name:"Roundup Klasik 5 l",qty:2,unit:"ks"}],
+                 "Materiál zahrada":[{id:"mz1",name:"Textilie 90g 1,6×100 m",qty:5,unit:"role"}],
+                 "Materiál stavba":[{id:"ms1",name:"Štěrk fr. 4-8",qty:18,unit:"t"}],
+                 "Nářadí":[{id:"n1",name:"Motorová pila Stihl MS 261",qty:2,unit:"ks"}]},
+        praha:  {"Rostliny / Trvalky":[{id:"pp1",name:"Salvia nemorosa 'Caradonna'",qty:90,unit:"ks"}]}
       };
 
-      function Tabs({value, onChange}){
-        const items = [
-          {key:"jobs", label:"Zakázky"},
-          {key:"employees", label:"Zaměstnanci"},
-          {key:"warehouse", label:"Sklad"},
-          {key:"settings", label:"Nastavení"},
-        ];
+      function UsersTab(){
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({email:"",name:"",role:"worker",password:""});
+        async function load(){ const j=await api("/api/users"); if(j.ok) setList(j.users); }
+        useEffect(()=>{load()},[]);
+        async function create(e){ e.preventDefault(); const j=await api("/api/users",{method:"POST",body:JSON.stringify(form)}); if(j.ok){ setForm({email:"",name:"",role:"worker",password:""}); load(); } }
+        async function setRole(id,role){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id,role})}); load(); }
+        async function toggleActive(u){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id:u.id,active:!u.active})}); load(); }
         return (
-          <div className="tabs">
-            {items.map(it=> (
-              <div key={it.key}
-                   className={"tab"+(it.key===value?" active":"")}
-                   onClick={()=> onChange(it.key)}>{it.label}</div>
-            ))}
+          <div className="grid" style={{gridTemplateColumns:"1fr"}}>
+            <div className="card">
+              <div className="card-h"><div>Nový uživatel</div></div>
+              <div className="card-c">
+                <form onSubmit={create}>
+                  <div className="form-row"><input placeholder="E‑mail" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required style={{flex:1}}/></div>
+                  <div className="form-row"><input placeholder="Jméno" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:1}}/></div>
+                  <div className="form-row">
+                    <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>
+                      <option value="worker">worker</option>
+                      <option value="manager">manager</option>
+                      <option value="admin">admin</option>
+                    </select>
+                    <input type="password" placeholder="Heslo" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required/>
+                    <button type="submit">Vytvořit</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-h"><div>Uživatelé</div></div>
+              <div className="card-c">
+                <table className="table">
+                  <thead><tr><th>ID</th><th>E‑mail</th><th>Jméno</th><th>Role</th><th>Aktivní</th><th></th></tr></thead>
+                  <tbody>
+                    {list.map(u=>(
+                      <tr key={u.id}>
+                        <td>{u.id}</td><td>{u.email}</td><td>{u.name}</td><td>{u.role}</td><td>{u.active? "ano":"ne"}</td>
+                        <td className="small">
+                          <button className="ghost" onClick={()=>setRole(u.id,"worker")}>worker</button>
+                          <button className="ghost" onClick={()=>setRole(u.id,"manager")}>manager</button>
+                          <button className="ghost" onClick={()=>setRole(u.id,"admin")}>admin</button>
+                          <button className="ghost" onClick={()=>toggleActive(u)}>{u.active?"deaktivovat":"aktivovat"}</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         );
       }
 
       function Jobs(){
         const [open, setOpen] = useState(null);
-        const [stage, setStage] = useState({}); // per job: Plán -> Probíhá -> Dokončeno
-
-        const pipeline = (s)=>{
-          const order = ["Plán","Probíhá","Dokončeno"];
-          const i = order.indexOf(s||"Plán");
-          const next = order[(i+1)%order.length];
-          return next;
-        };
-
+        const [stage, setStage] = useState({});
+        const pipeline = (s)=>{ const order=["Plán","Probíhá","Dokončeno"]; const i=order.indexOf(s||"Plán"); return order[(i+1)%order.length]; };
+        function compress(e,maxSide=1200,quality=0.8, id){
+          const file = e.target.files?.[0]; if(!file) return;
+          const img = new Image();
+          const reader = new FileReader();
+          reader.onload = () => { img.src = reader.result; };
+          reader.readAsDataURL(file);
+          img.onload = () => {
+            const scale = (img.width>img.height) ? maxSide/img.width : maxSide/img.height;
+            const w = Math.round(img.width*scale);
+            const h = Math.round(img.height*scale);
+            const c = document.createElement("canvas");
+            c.width = w; c.height = h;
+            const ctx = c.getContext("2d");
+            ctx.drawImage(img,0,0,w,h);
+            const url = c.toDataURL("image/jpeg", quality);
+            const preview = document.getElementById("preview-"+id);
+            preview.innerHTML = "";
+            const im = document.createElement("img");
+            im.src = url; im.className="img-preview";
+            preview.appendChild(im);
+          };
+        }
+        function exportSection(){ window.print(); }
         return (
           <div className="grid" style={{gridTemplateColumns:"1fr 1fr"}}>
             {JOBS.map(z=> (
@@ -136,7 +201,7 @@
                       <div className="card" style={{marginBottom:12}}>
                         <div className="card-h"><div>Materiál</div><button>Přidat položku</button></div>
                         <div className="card-c small">
-                          <div className="row h"><div className="c" style={{gridColumn:"span 6"}}>Název</div><div className="c" style={{gridColumn:"span 3",textAlign:"right"}}>Množství</div><div className="c" style={{gridColumn:"span 2"}}>Jedn.</div><div className="c" style={{gridColumn:"span 1",textAlign:"right"}}>Akce</div></div>
+                          <div className="row h"><div style={{gridColumn:"span 6"}}>Název</div><div style={{gridColumn:"span 3",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 2"}}>Jedn.</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Akce</div></div>
                           <div className="row"><div style={{gridColumn:"span 6"}}>Mulčovací kůra 70 l</div><div style={{gridColumn:"span 3",textAlign:"right"}}>30</div><div style={{gridColumn:"span 2"}}>ks</div><div style={{gridColumn:"span 1",textAlign:"right"}}>—</div></div>
                           <div className="row"><div style={{gridColumn:"span 6"}}>PE hadice 16 mm</div><div style={{gridColumn:"span 3",textAlign:"right"}}>120</div><div style={{gridColumn:"span 2"}}>m</div><div style={{gridColumn:"span 1",textAlign:"right"}}>—</div></div>
                         </div>
@@ -162,7 +227,7 @@
                   )}
                   <div style={{marginTop:12, display:"flex", gap:8}}>
                     <button onClick={()=> setStage(s=>({...s,[z.id]: pipeline(s[z.id]||z.status)}))}>Posunout stav</button>
-                    <button className="ghost" onClick={()=>exportSection(z.id)}>Export PDF náhledu</button>
+                    <button className="ghost" onClick={exportSection}>Export PDF náhledu</button>
                   </div>
                 </div>
               </div>
@@ -219,9 +284,7 @@
         const [q, setQ] = useState("");
         const data = WAREHOUSE[site];
         const rows = [];
-        Object.entries(data||{}).forEach(([cat,items])=>{
-          (items||[]).forEach(it=> rows.push({...it, path:cat}));
-        });
+        Object.entries(data||{}).forEach(([cat,items])=>{ (items||[]).forEach(it=> rows.push({...it, path:cat})); });
         const filtered = rows.filter(r=> r.name.toLowerCase().includes(q.toLowerCase()));
         return (
           <div>
@@ -254,53 +317,36 @@
           <div className="card">
             <div className="card-c">
               <div className="row small"><div style={{gridColumn:"span 12"}}><b>Vzhled:</b> vysoký kontrast, tmavé pozadí, světlé písmo. Žádné zelené písmo.</div></div>
-              <div className="row small"><div style={{gridColumn:"span 12"}}><b>Export:</b> tlačítko „Export PDF náhledu“ je demo (vytvoří tiskový dialog pro konkrétní zakázku).</div></div>
+              <div className="row small"><div style={{gridColumn:"span 12"}}><b>Export:</b> „Export PDF náhledu“ otevře tiskový dialog (uložíš jako PDF).</div></div>
             </div>
           </div>
         );
       }
 
       function App(){
+        const [auth,setAuth]=useState({ready:false, ok:false, user:null});
         const [tab, setTab] = useState("jobs");
+        useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); })()},[]);
+        if(!auth.ready) return <div className="small">Načítám…</div>;
+        if(!auth.ok) return <Login onLogged={()=>location.reload()}/>;
+        const canAdmin = auth.user?.role==="admin";
         return (
           <div>
-            <Tabs value={tab} onChange={setTab}/>
+            <div className="tabs">
+              <div className={"tab"+(tab==="jobs"?" active":"")} onClick={()=>setTab("jobs")}>Zakázky</div>
+              <div className={"tab"+(tab==="employees"?" active":"")} onClick={()=>setTab("employees")}>Zaměstnanci</div>
+              <div className={"tab"+(tab==="warehouse"?" active":"")} onClick={()=>setTab("warehouse")}>Sklad</div>
+              {canAdmin && <div className={"tab"+(tab==="users"?" active":"")} onClick={()=>setTab("users")}>Uživatelé</div>}
+              <div className={"tab"+(tab==="settings"?" active":"")} onClick={()=>setTab("settings")}>Nastavení</div>
+            </div>
             <div style={{height:12}}/>
             {tab==="jobs" && <Jobs/>}
             {tab==="employees" && <Employees/>}
             {tab==="warehouse" && <Warehouse/>}
+            {tab==="users" && canAdmin && <UsersTab/>}
             {tab==="settings" && <Settings/>}
           </div>
         );
-      }
-
-      // ---- Helpers ----
-      function compress(e,maxSide=1200,quality=0.8, id){ // image compressor (canvas → JPEG)
-        const file = e.target.files?.[0]; if(!file) return;
-        const img = new Image();
-        const reader = new FileReader();
-        reader.onload = () => { img.src = reader.result; };
-        reader.readAsDataURL(file);
-        img.onload = () => {
-          const scale = (img.width>img.height) ? maxSide/img.width : maxSide/img.height;
-          const w = Math.round(img.width*scale);
-          const h = Math.round(img.height*scale);
-          const c = document.createElement("canvas");
-          c.width = w; c.height = h;
-          const ctx = c.getContext("2d");
-          ctx.drawImage(img,0,0,w,h);
-          const url = c.toDataURL("image/jpeg", quality);
-          const preview = document.getElementById("preview-"+id);
-          preview.innerHTML = "";
-          const im = document.createElement("img");
-          im.src = url; im.className="img-preview";
-          preview.appendChild(im);
-        };
-      }
-
-      function exportSection(jobId){
-        // jednoduchý „print to PDF“ export aktuální stránky – user si uloží jako PDF
-        window.print();
       }
 
       ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
