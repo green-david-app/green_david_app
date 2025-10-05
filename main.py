@@ -325,8 +325,8 @@ def api_items():
     db = get_db()
     if request.method == "GET":
         site = request.args.get("site")
-        q = "SELECT * FROM items" + (" WHERE site=?" if site in ("lipnik","praha") else "") + " ORDER BY id DESC"
-        rows = db.execute(q, (site, ) if site in ("lipnik","praha") else ()).fetchall()
+        q = "SELECT * FROM items" + (" WHERE site=?" if site in ('lipnik','praha') else "") + " ORDER BY id DESC"
+        rows = db.execute(q, (site, ) if site in ('lipnik','praha') else ()).fetchall()
         return jsonify({"ok": True, "items":[dict(r) for r in rows]})
     data = request.get_json(force=True, silent=True) or {}
     if request.method == "POST":
