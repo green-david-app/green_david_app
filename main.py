@@ -1,8 +1,4 @@
-import os
-import re
-import io
-import base64
-import sqlite3
+import os, re, io, base64, sqlite3
 from datetime import datetime
 from flask import Flask, send_from_directory, request, jsonify, session, g, send_file, abort
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -27,11 +23,26 @@ def close_db(error=None):
     if db is not None:
         db.close()
 
-def init_db():
-    db = get_db()
-    c = db.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+# ---------- migrations ----------
+def get_version(db):
+    db.execute("CREATE TABLE IF NOT EXISTS app_meta (id INTEGER PRIMARY KEY CHECK (id=1), version INTEGER NOT NULL)")
+    row = db.execute("SELECT version FROM app_meta WHERE id=1").fetchone()
+    if row is None:
+        db.execute("INSERT INTO app_meta(id,version) VALUES (1,0)")
+        db.commit()
+        return 0
+    return row["version"]
+
+def set_version(db, v):
+    db.execute("UPDATE app_meta SET version=? WHERE id=1", (v,))
+    db.commit()
+
+def migrate(db):
+    v = get_version(db)
+    # v1: base tables
+    if v < 1:
+        c = db.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
@@ -39,10 +50,8 @@ def init_db():
             password_hash TEXT NOT NULL,
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             client TEXT NOT NULL,
@@ -51,68 +60,83 @@ def init_db():
             code TEXT NOT NULL,
             date TEXT NOT NULL,
             note TEXT
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS employees (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             role TEXT NOT NULL
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS items (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             site TEXT NOT NULL CHECK(site IN ('lipnik','praha')),
             category TEXT NOT NULL,
             name TEXT NOT NULL,
             qty REAL NOT NULL DEFAULT 0,
             unit TEXT NOT NULL
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS job_materials (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS job_materials (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             qty REAL NOT NULL,
             unit TEXT NOT NULL
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS job_tools (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS job_tools (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             qty REAL NOT NULL,
             unit TEXT NOT NULL
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS job_photos (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS job_photos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id INTEGER NOT NULL,
             filename TEXT NOT NULL,
             created_at TEXT NOT NULL
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS job_assignments (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS job_assignments (
             job_id INTEGER NOT NULL,
             employee_id INTEGER NOT NULL,
             PRIMARY KEY(job_id, employee_id)
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS timesheets (
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS timesheets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
             job_id INTEGER NOT NULL,
             date TEXT NOT NULL,
             hours REAL NOT NULL
-        )
-    """)
-    db.commit()
+        )""")
+        db.commit()
+        set_version(db, 1)
+        v = 1
+    # v2: timesheets place + activity columns
+    if v < 2:
+        info = db.execute("PRAGMA table_info(timesheets)").fetchall()
+        cols = {r["name"] for r in info}
+        if "place" not in cols:
+            db.execute("ALTER TABLE timesheets ADD COLUMN place TEXT")
+        if "activity" not in cols:
+            db.execute("ALTER TABLE timesheets ADD COLUMN activity TEXT")
+        db.commit()
+        set_version(db, 2)
+        v = 2
+    # v3: tasks table
+    if v < 3:
+        db.execute("""CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'nový',
+            due_date TEXT,
+            employee_id INTEGER,
+            job_id INTEGER,
+            created_by INTEGER,
+            created_at TEXT NOT NULL
+        )""")
+        db.commit()
+        set_version(db, 3)
+
+def seed_admin(db):
     cur = db.execute("SELECT COUNT(*) as c FROM users")
     if cur.fetchone()["c"] == 0:
         db.execute("""INSERT INTO users(email,name,role,password_hash,active,created_at)
@@ -126,8 +150,11 @@ def init_db():
 
 @app.before_request
 def ensure_db():
-    init_db()
+    db = get_db()
+    migrate(db)
+    seed_admin(db)
 
+# ---------- static ----------
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
@@ -136,14 +163,14 @@ def index():
 def uploaded_file(name):
     safe = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
     path = os.path.join(UPLOAD_DIR, safe)
-    if not os.path.isfile(path):
-        return abort(404)
+    if not os.path.isfile(path): abort(404)
     return send_from_directory(UPLOAD_DIR, safe)
 
 @app.route("/health")
 def health():
     return {"status": "ok"}
 
+# ---------- auth helpers ----------
 def current_user():
     uid = session.get("uid")
     if not uid:
@@ -165,10 +192,15 @@ def require_role(write=False):
         return None, (jsonify({"ok": False, "error": "forbidden"}), 403)
     return u, None
 
+# ---------- auth ----------
 @app.route("/api/me")
 def api_me():
     u = current_user()
-    return jsonify({"ok": True, "authenticated": bool(u), "user": u})
+    tasks_count = 0
+    if u:
+        db = get_db()
+        tasks_count = db.execute("SELECT COUNT(*) c FROM tasks WHERE employee_id=? AND status!='hotovo'", (u["id"],)).fetchone()["c"]
+    return jsonify({"ok": True, "authenticated": bool(u), "user": u, "tasks_count": tasks_count})
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
@@ -187,6 +219,7 @@ def api_logout():
     session.pop("uid", None)
     return jsonify({"ok": True})
 
+# ---------- users (admin) ----------
 @app.route("/api/users", methods=["GET","POST","PATCH"])
 def api_users():
     u, err = require_auth()
@@ -233,6 +266,61 @@ def api_users():
         db.commit()
         return jsonify({"ok": True})
 
+# ---------- employees + timesheets ----------
+@app.route("/api/employees", methods=["GET","POST","DELETE"])
+def api_employees():
+    u, err = require_role(write=(request.method!="GET"))
+    if err: return err
+    db = get_db()
+    if request.method == "GET":
+        rows = db.execute("SELECT * FROM employees ORDER BY id DESC").fetchall()
+        return jsonify({"ok": True, "employees":[dict(r) for r in rows]})
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        name = data.get("name"); role = data.get("role")
+        if not (name and role): return jsonify({"ok": False, "error":"invalid_input"}), 400
+        db.execute("INSERT INTO employees(name,role) VALUES (?,?)", (name, role))
+        db.commit()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        eid = request.args.get("id", type=int)
+        if not eid: return jsonify({"ok": False, "error":"missing_id"}), 400
+        db.execute("DELETE FROM employees WHERE id=?", (eid,))
+        db.commit()
+        return jsonify({"ok": True})
+
+@app.route("/api/timesheets", methods=["GET","POST","DELETE"])
+def api_timesheets():
+    u, err = require_role(write=(request.method!="GET"))
+    if err: return err
+    db = get_db()
+    if request.method == "GET":
+        emp = request.args.get("employee_id", type=int)
+        q = "SELECT t.id,t.employee_id,t.job_id,t.date,t.hours,t.place,t.activity,j.title as job_title,j.code FROM timesheets t JOIN jobs j ON j.id=t.job_id"
+        params = []
+        if emp:
+            q += " WHERE t.employee_id=?"
+            params.append(emp)
+        q += " ORDER BY date DESC, t.id DESC"
+        rows = db.execute(q, params).fetchall()
+        return jsonify({"ok": True, "rows":[dict(r) for r in rows]})
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        emp = data.get("employee_id"); job = data.get("job_id"); date=data.get("date"); hours = data.get("hours")
+        place = data.get("place") or ""
+        activity = data.get("activity") or ""
+        if not all([emp,job,date,hours is not None]): return jsonify({"ok": False, "error":"invalid_input"}), 400
+        db.execute("INSERT INTO timesheets(employee_id,job_id,date,hours,place,activity) VALUES (?,?,?,?,?,?)", (emp,job,date,float(hours),place,activity))
+        db.commit()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        tid = request.args.get("id", type=int)
+        if not tid: return jsonify({"ok": False, "error":"missing_id"}), 400
+        db.execute("DELETE FROM timesheets WHERE id=?", (tid,))
+        db.commit()
+        return jsonify({"ok": True})
+
+# ---------- warehouse ----------
 VALID_CATS = ('trvalky','trávy','dřeviny','stromy','cibuloviny','hnojiva/postřiky','materiál zahrada','materiál stavba')
 
 @app.route("/api/items", methods=["GET","POST","PATCH","DELETE"])
@@ -280,57 +368,7 @@ def api_items():
         db.commit()
         return jsonify({"ok": True})
 
-@app.route("/api/employees", methods=["GET","POST","DELETE"])
-def api_employees():
-    u, err = require_role(write=(request.method!="GET"))
-    if err: return err
-    db = get_db()
-    if request.method == "GET":
-        rows = db.execute("SELECT * FROM employees ORDER BY id DESC").fetchall()
-        return jsonify({"ok": True, "employees":[dict(r) for r in rows]})
-    if request.method == "POST":
-        data = request.get_json(force=True, silent=True) or {}
-        name = data.get("name"); role = data.get("role")
-        if not (name and role): return jsonify({"ok": False, "error":"invalid_input"}), 400
-        db.execute("INSERT INTO employees(name,role) VALUES (?,?)", (name, role))
-        db.commit()
-        return jsonify({"ok": True})
-    if request.method == "DELETE":
-        eid = request.args.get("id", type=int)
-        if not eid: return jsonify({"ok": False, "error":"missing_id"}), 400
-        db.execute("DELETE FROM employees WHERE id=?", (eid,))
-        db.commit()
-        return jsonify({"ok": True})
-
-@app.route("/api/timesheets", methods=["GET","POST","DELETE"])
-def api_timesheets():
-    u, err = require_role(write=(request.method!="GET"))
-    if err: return err
-    db = get_db()
-    if request.method == "GET":
-        emp = request.args.get("employee_id", type=int)
-        q = "SELECT t.id,t.employee_id,t.job_id,t.date,t.hours,j.title as job_title FROM timesheets t JOIN jobs j ON j.id=t.job_id"
-        params = []
-        if emp:
-            q += " WHERE t.employee_id=?"
-            params.append(emp)
-        q += " ORDER BY date DESC, t.id DESC"
-        rows = db.execute(q, params).fetchall()
-        return jsonify({"ok": True, "rows":[dict(r) for r in rows]})
-    if request.method == "POST":
-        data = request.get_json(force=True, silent=True) or {}
-        emp = data.get("employee_id"); job = data.get("job_id"); date=data.get("date"); hours = data.get("hours")
-        if not all([emp,job,date,hours is not None]): return jsonify({"ok": False, "error":"invalid_input"}), 400
-        db.execute("INSERT INTO timesheets(employee_id,job_id,date,hours) VALUES (?,?,?,?)", (emp,job,date,float(hours)))
-        db.commit()
-        return jsonify({"ok": True})
-    if request.method == "DELETE":
-        tid = request.args.get("id", type=int)
-        if not tid: return jsonify({"ok": False, "error":"missing_id"}), 400
-        db.execute("DELETE FROM timesheets WHERE id=?", (tid,))
-        db.commit()
-        return jsonify({"ok": True})
-
+# ---------- jobs ----------
 @app.route("/api/jobs", methods=["GET","POST","PATCH","DELETE"])
 def api_jobs():
     u, err = require_role(write=(request.method!="GET"))
@@ -383,7 +421,8 @@ def api_job_detail(jid):
     tools = [dict(r) for r in db.execute("SELECT * FROM job_tools WHERE job_id=? ORDER BY id DESC", (jid,)).fetchall()]
     photos = [dict(r) for r in db.execute("SELECT * FROM job_photos WHERE job_id=? ORDER BY id DESC", (jid,)).fetchall()]
     assigns = [r["employee_id"] for r in db.execute("SELECT employee_id FROM job_assignments WHERE job_id=?", (jid,)).fetchall()]
-    return jsonify({"ok": True, "job": dict(job), "materials": mats, "tools": tools, "photos": photos, "assignments": assigns})
+    tasks = [dict(r) for r in db.execute("SELECT * FROM tasks WHERE job_id=? ORDER BY status DESC, due_date ASC NULLS LAST, id DESC", (jid,)).fetchall()]
+    return jsonify({"ok": True, "job": dict(job), "materials": mats, "tools": tools, "photos": photos, "assignments": assigns, "tasks": tasks})
 
 @app.route("/api/jobs/<int:jid>/materials", methods=["POST","DELETE"])
 def api_job_materials(jid):
@@ -438,7 +477,7 @@ def api_job_photos(jid):
         ext = "jpg" if m.group(1)=="jpeg" else m.group(1)
         raw = base64.b64decode(m.group(2))
         fname = f"job{jid}-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}.{ext}"
-        with open(os.path.join("uploads", fname), "wb") as f:
+        with open(os.path.join(UPLOAD_DIR, fname), "wb") as f:
             f.write(raw)
         db.execute("INSERT INTO job_photos(job_id,filename,created_at) VALUES (?,?,?)", (jid, fname, datetime.utcnow().isoformat()))
         db.commit()
@@ -448,7 +487,7 @@ def api_job_photos(jid):
         if not pid: return jsonify({"ok": False, "error":"missing_id"}), 400
         row = db.execute("SELECT filename FROM job_photos WHERE id=? AND job_id=?", (pid, jid)).fetchone()
         if row:
-            try: os.remove(os.path.join("uploads", row["filename"]))
+            try: os.remove(os.path.join(UPLOAD_DIR, row["filename"]))
             except Exception: pass
         db.execute("DELETE FROM job_photos WHERE id=? AND job_id=?", (pid, jid))
         db.commit()
@@ -474,6 +513,65 @@ def api_job_assignments(jid):
     db.commit()
     return jsonify({"ok": True})
 
+# ---------- tasks ----------
+VALID_STATUS = ('nový','probíhá','hotovo')
+
+@app.route("/api/tasks", methods=["GET","POST","PATCH","DELETE"])
+def api_tasks():
+    u, err = require_role(write=(request.method!="GET"))
+    if err: return err
+    db = get_db()
+    if request.method == "GET":
+        mine = request.args.get("mine")
+        job_id = request.args.get("job_id", type=int)
+        q = "SELECT * FROM tasks"
+        conds = []
+        params = []
+        if mine and u:
+            conds.append("employee_id=?"); params.append(u["id"])
+        if job_id:
+            conds.append("job_id=?"); params.append(job_id)
+        if conds:
+            q += " WHERE " + " AND ".join(conds)
+        q += " ORDER BY status DESC, due_date ASC NULLS LAST, id DESC"
+        rows = db.execute(q, params).fetchall()
+        return jsonify({"ok": True, "tasks":[dict(r) for r in rows]})
+    data = request.get_json(force=True, silent=True) or {}
+    if request.method == "POST":
+        title = data.get("title"); description = data.get("description") or ""
+        due_date = data.get("due_date"); status = data.get("status") or "nový"
+        employee_id = data.get("employee_id"); job_id = data.get("job_id")
+        if status not in VALID_STATUS:
+            return jsonify({"ok": False, "error":"bad_status"}), 400
+        if not title:
+            return jsonify({"ok": False, "error":"missing_title"}), 400
+        db.execute("""INSERT INTO tasks(title,description,status,due_date,employee_id,job_id,created_by,created_at)
+                      VALUES (?,?,?,?,?,?,?,?)""",
+                   (title, description, status, due_date, employee_id, job_id, u["id"], datetime.utcnow().isoformat()))
+        db.commit()
+        return jsonify({"ok": True})
+    if request.method == "PATCH":
+        tid = data.get("id")
+        if not tid: return jsonify({"ok": False, "error":"missing_id"}), 400
+        updates=[]; params=[]
+        for f in ["title","description","status","due_date","employee_id","job_id"]:
+            if f in data:
+                if f=="status" and data[f] not in VALID_STATUS:
+                    return jsonify({"ok": False, "error":"bad_status"}), 400
+                updates.append(f"{f}=?"); params.append(data[f])
+        if not updates: return jsonify({"ok": False, "error":"nothing_to_update"}), 400
+        params.append(tid)
+        db.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id=?", params)
+        db.commit()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        tid = request.args.get("id", type=int)
+        if not tid: return jsonify({"ok": False, "error":"missing_id"}), 400
+        db.execute("DELETE FROM tasks WHERE id=?", (tid,))
+        db.commit()
+        return jsonify({"ok": True})
+
+# ---------- exports ----------
 @app.route("/export/employee_hours.xlsx")
 def export_employee_hours():
     u, err = require_auth()
@@ -481,7 +579,7 @@ def export_employee_hours():
     emp = request.args.get("employee_id", type=int)
     if not emp: return jsonify({"ok": False, "error":"missing_employee"}), 400
     db = get_db()
-    rows = db.execute("""SELECT t.date,t.hours,j.title,j.code
+    rows = db.execute("""SELECT t.date,t.hours,t.place,t.activity,j.title,j.code
                          FROM timesheets t JOIN jobs j ON j.id=t.job_id
                          WHERE t.employee_id=? ORDER BY t.date ASC""",(emp,)).fetchall()
     try:
@@ -492,10 +590,10 @@ def export_employee_hours():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Hodiny"
-    ws.append(["Datum","Hodiny","Zakázka","Kód"])
+    ws.append(["Datum","Hodiny","Zakázka","Kód","Místo","Popis činnosti"])
     for r in rows:
-        ws.append([r["date"], float(r["hours"]), r["title"], r["code"]])
-    for i,w in enumerate([14,10,40,16], start=1):
+        ws.append([r["date"], float(r["hours"]), r["title"], r["code"], r["place"] or "", r["activity"] or ""])
+    for i,w in enumerate([14,10,40,16,20,40], start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     bio = io.BytesIO()
     wb.save(bio); bio.seek(0)
