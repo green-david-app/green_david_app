@@ -1,3 +1,4 @@
+
 import os, re, io, base64, sqlite3
 from datetime import datetime
 from flask import Flask, send_from_directory, request, jsonify, session, g, send_file, abort
@@ -39,7 +40,6 @@ def set_version(db, v):
 
 def migrate(db):
     v = get_version(db)
-    # v1: base tables
     if v < 1:
         c = db.cursor()
         c.execute("""CREATE TABLE IF NOT EXISTS users (
@@ -104,24 +104,14 @@ def migrate(db):
             employee_id INTEGER NOT NULL,
             job_id INTEGER NOT NULL,
             date TEXT NOT NULL,
-            hours REAL NOT NULL
+            hours REAL NOT NULL,
+            place TEXT,
+            activity TEXT
         )""")
         db.commit()
         set_version(db, 1)
         v = 1
-    # v2: timesheets place + activity columns
     if v < 2:
-        info = db.execute("PRAGMA table_info(timesheets)").fetchall()
-        cols = {r["name"] for r in info}
-        if "place" not in cols:
-            db.execute("ALTER TABLE timesheets ADD COLUMN place TEXT")
-        if "activity" not in cols:
-            db.execute("ALTER TABLE timesheets ADD COLUMN activity TEXT")
-        db.commit()
-        set_version(db, 2)
-        v = 2
-    # v3: tasks table
-    if v < 3:
         db.execute("""CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -134,7 +124,7 @@ def migrate(db):
             created_at TEXT NOT NULL
         )""")
         db.commit()
-        set_version(db, 3)
+        set_version(db, 2)
 
 def seed_admin(db):
     cur = db.execute("SELECT COUNT(*) as c FROM users")
@@ -296,12 +286,17 @@ def api_timesheets():
     db = get_db()
     if request.method == "GET":
         emp = request.args.get("employee_id", type=int)
-        q = "SELECT t.id,t.employee_id,t.job_id,t.date,t.hours,t.place,t.activity,j.title as job_title,j.code FROM timesheets t JOIN jobs j ON j.id=t.job_id"
-        params = []
-        if emp:
-            q += " WHERE t.employee_id=?"
-            params.append(emp)
-        q += " ORDER BY date DESC, t.id DESC"
+        jid = request.args.get("job_id", type=int)
+        q = """SELECT t.id,t.employee_id,t.job_id,t.date,t.hours,t.place,t.activity,
+                      e.name AS employee_name, j.title AS job_title, j.code AS job_code
+               FROM timesheets t
+               LEFT JOIN employees e ON e.id=t.employee_id
+               LEFT JOIN jobs j ON j.id=t.job_id"""
+        conds=[]; params=[]
+        if emp: conds.append("t.employee_id=?"); params.append(emp)
+        if jid: conds.append("t.job_id=?"); params.append(jid)
+        if conds: q += " WHERE " + " AND ".join(conds)
+        q += " ORDER BY t.date DESC, t.id DESC"
         rows = db.execute(q, params).fetchall()
         return jsonify({"ok": True, "rows":[dict(r) for r in rows]})
     if request.method == "POST":
@@ -421,8 +416,11 @@ def api_job_detail(jid):
     tools = [dict(r) for r in db.execute("SELECT * FROM job_tools WHERE job_id=? ORDER BY id DESC", (jid,)).fetchall()]
     photos = [dict(r) for r in db.execute("SELECT * FROM job_photos WHERE job_id=? ORDER BY id DESC", (jid,)).fetchall()]
     assigns = [r["employee_id"] for r in db.execute("SELECT employee_id FROM job_assignments WHERE job_id=?", (jid,)).fetchall()]
-    tasks = [dict(r) for r in db.execute("SELECT * FROM tasks WHERE job_id=? ORDER BY status DESC, due_date ASC NULLS LAST, id DESC", (jid,)).fetchall()]
-    return jsonify({"ok": True, "job": dict(job), "materials": mats, "tools": tools, "photos": photos, "assignments": assigns, "tasks": tasks})
+    tasks = [dict(r) for r in db.execute("SELECT * FROM tasks WHERE job_id=? ORDER BY (due_date IS NULL), due_date ASC, id DESC", (jid,)).fetchall()]
+    hours = [dict(r) for r in db.execute("""SELECT t.id,t.employee_id,e.name as employee_name,t.date,t.hours,t.place,t.activity
+                                           FROM timesheets t LEFT JOIN employees e ON e.id=t.employee_id
+                                           WHERE t.job_id=? ORDER BY t.date DESC, t.id DESC""",(jid,)).fetchall()]
+    return jsonify({"ok": True, "job": dict(job), "materials": mats, "tools": tools, "photos": photos, "assignments": assigns, "tasks": tasks, "hours": hours})
 
 @app.route("/api/jobs/<int:jid>/materials", methods=["POST","DELETE"])
 def api_job_materials(jid):
@@ -525,15 +523,14 @@ def api_tasks():
         mine = request.args.get("mine")
         job_id = request.args.get("job_id", type=int)
         q = "SELECT * FROM tasks"
-        conds = []
-        params = []
+        conds = []; params = []
         if mine and u:
             conds.append("employee_id=?"); params.append(u["id"])
         if job_id:
             conds.append("job_id=?"); params.append(job_id)
         if conds:
             q += " WHERE " + " AND ".join(conds)
-        q += " ORDER BY status DESC, due_date ASC NULLS LAST, id DESC"
+        q += " ORDER BY (due_date IS NULL), due_date ASC, id DESC"
         rows = db.execute(q, params).fetchall()
         return jsonify({"ok": True, "tasks":[dict(r) for r in rows]})
     data = request.get_json(force=True, silent=True) or {}
