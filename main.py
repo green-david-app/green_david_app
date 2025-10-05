@@ -86,7 +86,14 @@ def init_db():
 def ensure_db():
     init_db()
 
-# ---------- Helpers ----------
+@app.route("/")
+def index():
+    return send_from_directory(".", "index.html")
+
+@app.route("/health")
+def health():
+    return {"status": "ok"}
+
 def current_user():
     uid = session.get("uid")
     if not uid:
@@ -108,16 +115,7 @@ def require_role(write=False):
         return None, (jsonify({"ok": False, "error": "forbidden"}), 403)
     return u, None
 
-# ---------- Static ----------
-@app.route("/")
-def index():
-    return send_from_directory(".", "index.html")
-
-@app.route("/health")
-def health():
-    return {"status": "ok"}
-
-# ---------- Auth API ----------
+# ---- Auth API ----
 @app.route("/api/me")
 def api_me():
     u = current_user()
@@ -140,22 +138,20 @@ def api_logout():
     session.pop("uid", None)
     return jsonify({"ok": True})
 
-# ---------- Users (admin only minimal) ----------
+# ---- Users (admin) ----
 @app.route("/api/users", methods=["GET","POST","PATCH"])
 def api_users():
     u, err = require_auth()
     if err: return err
+    db = get_db()
     if request.method == "GET":
         if u["role"] != "admin":
             return jsonify({"ok": False, "error": "forbidden"}), 403
-        db = get_db()
         rows = db.execute("SELECT id,email,name,role,active,created_at FROM users ORDER BY id").fetchall()
         return jsonify({"ok": True, "users":[dict(r) for r in rows]})
-    # write ops only admin
     if u["role"] != "admin":
         return jsonify({"ok": False, "error": "forbidden"}), 403
     data = request.get_json(force=True, silent=True) or {}
-    db = get_db()
     if request.method == "POST":
         email = (data.get("email") or "").strip().lower()
         name = data.get("name") or ""
@@ -189,7 +185,7 @@ def api_users():
         db.commit()
         return jsonify({"ok": True})
 
-# ---------- Jobs CRUD ----------
+# ---- Jobs CRUD ----
 @app.route("/api/jobs", methods=["GET","POST","PATCH","DELETE"])
 def api_jobs():
     u, err = require_role(write=(request.method!="GET"))
@@ -230,7 +226,7 @@ def api_jobs():
         db.commit()
         return jsonify({"ok": True})
 
-# ---------- Employees CRUD ----------
+# ---- Employees CRUD ----
 @app.route("/api/employees", methods=["GET","POST","PATCH","DELETE"])
 def api_employees():
     u, err = require_role(write=(request.method!="GET"))
@@ -264,7 +260,7 @@ def api_employees():
         db.commit()
         return jsonify({"ok": True})
 
-# ---------- Warehouse Items CRUD ----------
+# ---- Warehouse Items CRUD ----
 @app.route("/api/items", methods=["GET","POST","PATCH","DELETE"])
 def api_items():
     u, err = require_role(write=(request.method!="GET"))
@@ -294,7 +290,7 @@ def api_items():
             if f in data:
                 if f=="site" and data[f] not in ("lipnik","praha"):
                     return jsonify({"ok": False, "error":"bad_site"}), 400
-                updates.append(f"{f}=?"); 
+                updates.append(f"{f}=?")
                 params.append(float(data[f]) if f=="qty" else data[f])
         if not updates: return jsonify({"ok": False, "error":"nothing_to_update"}), 400
         params.append(iid)

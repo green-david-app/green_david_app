@@ -9,7 +9,7 @@
   <body>
     <header class="header">
       <div class="brand">
-        <img src="/logo.svg" alt="GreenDavid" class="logo-img" />
+        <img src="/logo.svg" alt="GreenDavid" class="brand-logo" />
         <div>
           <div style="font-weight:700">GreenDavid – Interní systém</div>
           <div class="brand-sub">Zakázky • Zaměstnanci • Sklad</div>
@@ -20,6 +20,7 @@
 
     <main class="container">
       <div id="app"></div>
+      <div id="js-error" class="error-overlay" style="display:none"></div>
     </main>
 
     <!-- React & Babel -->
@@ -27,20 +28,35 @@
     <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone@7.24.4/babel.min.js" crossorigin></script>
 
+    <script>
+      // Visible error overlay so "blank screen" se už nestane
+      function showJSError(msg){
+        var el = document.getElementById('js-error');
+        el.style.display = 'block';
+        el.textContent = String(msg || 'Neznámá chyba ve skriptu.');
+      }
+      window.addEventListener('error', function(e){ showJSError(e.error ? (e.error.stack||e.error) : (e.message||e)); });
+      window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason ? (e.reason.stack||e.reason) : e); });
+    </script>
+
     <script type="text/babel" data-presets="env,react">
       const { useState, useEffect, useMemo } = React;
 
       async function api(path, opts={}){
         const res = await fetch(path, {credentials:"same-origin", headers:{"Content-Type":"application/json"}, ...opts});
-        if(!res.ok){ try{ const j = await res.json(); throw new Error(j.error || res.statusText); } catch(e){ throw new Error(res.statusText); } }
-        try { return await res.json(); } catch { return {}; }
+        if(!res.ok){
+          let msg = res.statusText;
+          try{ const j = await res.json(); msg = j.error || msg; }catch{}
+          throw new Error(msg);
+        }
+        try{ return await res.json(); }catch{return {};}
       }
       async function refreshUserBox(){
         const box = document.getElementById("userbox");
         try{
           const j = await api("/api/me");
           if(j.authenticated){
-            box.innerHTML = \`Přihlášen: <b>\${j.user.name}</b> (\${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>\`;
+            box.innerHTML = `Přihlášen: <b>${j.user.name}</b> (${j.user.role}) &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>`;
             document.getElementById("logout-btn").onclick = async ()=>{ await api("/api/logout",{method:"POST"}); location.reload(); };
           } else {
             box.innerHTML = '<span>Nepřihlášen</span>';
@@ -56,8 +72,8 @@
           e.preventDefault();
           setErr("");
           try{
-            const j = await api("/api/login",{method:"POST", body: JSON.stringify({email, password:pass})});
-            if(j.ok!==false){ onLogged(); }
+            await api("/api/login",{method:"POST", body: JSON.stringify({email, password:pass})});
+            onLogged();
           }catch(e){ setErr("Špatný e‑mail nebo heslo"); }
         }
         return (
@@ -69,7 +85,7 @@
                 <div className="form-row"><input type="password" placeholder="Heslo" value={pass} onChange={e=>setPass(e.target.value)} required style={{flex:1}}/></div>
                 {err && <div className="small notice">{err}</div>}
                 <div className="form-row" style={{justifyContent:"flex-end"}}><button type="submit">Přihlásit</button></div>
-                <div className="small">Výchozí admin: <b>admin@greendavid.local</b> / <b>admin123</b> (změň po přihlášení).</div>
+                <div className="small">Výchozí admin: <b>admin@greendavid.local</b> / <b>admin123</b>.</div>
               </form>
             </div>
           </div>
@@ -148,7 +164,8 @@
       function Employees(){
         const [list,setList]=useState([]);
         const [form,setForm]=useState({name:"",role:"Zahradník"});
-        async function load(){ const j=await api("/api/employees"); setList(j.employees||[]); }
+        const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/employees"); setList(j.employees||[]); }catch(e){ setErr(e.message); } }
         useEffect(()=>{ load(); },[]);
         async function add(e){ e.preventDefault(); await api("/api/employees",{method:"POST",body:JSON.stringify(form)}); setForm({name:"",role:"Zahradník"}); load(); }
         async function del(id){ if(!confirm("Smazat zaměstnance?")) return; await api("/api/employees?id="+id,{method:"DELETE"}); load(); }
@@ -164,6 +181,7 @@
                     <button type="submit">Přidat</button>
                   </div>
                 </form>
+                {err && <div className="small notice">{err}</div>}
               </div>
             </div>
             <div className="card">
@@ -192,7 +210,8 @@
         const [list,setList]=useState([]);
         const [form,setForm]=useState({category:"",name:"",qty:0,unit:"ks"});
         const [q,setQ]=useState("");
-        async function load(){ const j=await api("/api/items?site="+site); setList(j.items||[]); }
+        const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/items?site="+site); setList(j.items||[]); }catch(e){ setErr(e.message); } }
         useEffect(()=>{ load(); },[site]);
         async function add(e){ e.preventDefault(); await api("/api/items",{method:"POST",body:JSON.stringify({...form,site})}); setForm({category:"",name:"",qty:0,unit:"ks"}); load(); }
         async function del(id){ if(!confirm("Smazat položku?")) return; await api("/api/items?id="+id,{method:"DELETE"}); load(); }
@@ -222,6 +241,7 @@
                     <button type="submit">Přidat</button>
                   </div>
                 </form>
+                {err && <div className="small notice">{err}</div>}
               </div>
             </div>
 
@@ -248,9 +268,10 @@
       function UsersTab(){
         const [list,setList]=useState([]);
         const [form,setForm]=useState({email:"",name:"",role:"worker",password:""});
-        async function load(){ const j=await api("/api/users"); if(j.ok!==false) setList(j.users||[]); }
+        const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/users"); setList(j.users||[]); }catch(e){ setErr(e.message);} }
         useEffect(()=>{load()},[]);
-        async function create(e){ e.preventDefault(); const j=await api("/api/users",{method:"POST",body:JSON.stringify(form)}); setForm({email:"",name:"",role:"worker",password:""}); load(); }
+        async function create(e){ e.preventDefault(); await api("/api/users",{method:"POST",body:JSON.stringify(form)}); setForm({email:"",name:"",role:"worker",password:""}); load(); }
         async function setRole(id,role){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id,role})}); load(); }
         async function toggleActive(u){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id:u.id,active:!u.active})}); load(); }
         return (
@@ -273,6 +294,7 @@
                     <button type="submit">Vytvořit</button>
                   </div>
                 </form>
+                {err && <div className="small notice">{err}</div>}
               </div>
             </div>
             <div className="card">
@@ -303,24 +325,26 @@
       function App(){
         const [auth,setAuth]=useState({ready:false, ok:false, user:null});
         const [tab, setTab] = useState("jobs");
-        useEffect(()=>{(async()=>{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); })()},[]);
+        useEffect(()=>{(async()=>{ try{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null}); refreshUserBox(); }catch(e){ showJSError(e.message);} })()},[]);
         if(!auth.ready) return <div className="small">Načítám…</div>;
         if(!auth.ok) return <Login onLogged={()=>location.reload()}/>;
-        const canAdmin = auth.user?.role!=="worker";
+        const isAdmin = auth.user?.role==="admin";
         return (
           <div>
-            <Tabs value={tab} onChange={setTab} canAdmin={auth.user?.role==="admin"}/>
+            <Tabs value={tab} onChange={setTab} canAdmin={isAdmin}/>
             <div style={{height:12}}/>
             {tab==="jobs" && <Jobs/>}
             {tab==="employees" && <Employees/>}
             {tab==="warehouse" && <Warehouse/>}
-            {tab==="users" && auth.user?.role==="admin" && <UsersTab/>}
+            {tab==="users" && isAdmin && <UsersTab/>}
             <p className="small" style={{marginTop:14}}>© {new Date().getFullYear()} GreenDavid</p>
           </div>
         );
       }
 
-      ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
+      try{
+        ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
+      }catch(e){ showJSError(e.stack||e); }
     </script>
   </body>
 </html>
