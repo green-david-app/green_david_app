@@ -8,7 +8,7 @@ from typing import Optional
 
 APP_TITLE = "green david app"
 DB_PATH = "data.db"
-# Sem můžeš dát URL svého loga (PNG/SVG/JPG):
+LOGO_URL = "https://www.greendavid.eu/logo.png"
 LOGO_URL: Optional[str] = ""
 
 app = FastAPI(title=APP_TITLE, description="Správa zakázek, skladu a zaměstnanců (CZ)", version="3.1")
