@@ -1,84 +1,160 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from sqlmodel import SQLModel, Field, create_engine, Session, select
 
-app = FastAPI(title="green david app", description="Správa zakázek, skladu a zaměstnanců (CZ)", version="1.1")
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+import sqlite3
+from contextlib import closing
 
-# Databázový model
-class Employee(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    jmeno: str
-    pozice: str | None = None
+APP_TITLE = "green david app"
+DB_PATH = "data.db"
 
-class Project(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    nazev: str
-    zakaznik: str | None = None
-    poznamka: str | None = None
+app = FastAPI(title=APP_TITLE, description="Správa zakázek, skladu a zaměstnanců (CZ)", version="2.1")
 
-class Item(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    nazev: str
-    mnozstvi: float = 0
-    jednotka: str = "ks"
+# --- DB helpers ---
+def get_conn():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
-# Databáze
-engine = create_engine("sqlite:///data.db", echo=False)
-SQLModel.metadata.create_all(engine)
+def init_db():
+    with closing(get_conn()) as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                jmeno TEXT NOT NULL,
+                pozice TEXT
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nazev TEXT NOT NULL,
+                zakaznik TEXT,
+                poznamka TEXT
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nazev TEXT NOT NULL,
+                mnozstvi REAL NOT NULL DEFAULT 0,
+                jednotka TEXT NOT NULL DEFAULT 'ks'
+            );
+        """)
+        conn.commit()
 
-def get_all(session, model):
-    return session.exec(select(model)).all()
+@app.on_event("startup")
+def _startup():
+    init_db()
 
-# Hlavní stránka
+# --- HTML UI ---
+def layout(body_html: str) -> str:
+    # Použijeme percent-formatting, aby se nemusely escapovat složené závorky v CSS
+    tpl = """<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>%s</title>
+  <style>
+    body { background:#f5f5f5; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color:#fff; margin:0; }
+    header { background:#9fd5b0; padding:16px; text-align:center; font-weight:700; font-size:22px; }
+    main { padding:24px; max-width:1000px; margin:0 auto; }
+    .box { background:#9fd5b0; border-radius:12px; padding:16px; margin-bottom:18px; box-shadow:0 2px 6px rgba(0,0,0,.1); }
+    h2 { margin:0 0 10px; border-bottom:1px solid #ffffff55; padding-bottom:8px; }
+    ul { margin:8px 0 0; padding-left:20px; }
+    li { margin:4px 0; }
+    form.inline { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    input, textarea { padding:8px 10px; border-radius:8px; border:none; outline:none; background:#ffffff33; color:#fff; }
+    input::placeholder, textarea::placeholder { color:#ffffffaa; }
+    button { background:#7fc89b; border:none; color:#fff; padding:8px 12px; border-radius:8px; cursor:pointer; }
+    button:hover { background:#72be90; }
+    footer { position:fixed; bottom:0; left:0; right:0; background:#9fd5b0; text-align:center; color:#ffffffcc; padding:10px; }
+    .grid { display:grid; grid-template-columns: 1fr; gap:18px; }
+    @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <header>🌿 %s</header>
+  <main>
+    %s
+  </main>
+  <footer>© green david s.r.o.</footer>
+</body>
+</html>"""
+    return tpl % (APP_TITLE, APP_TITLE, body_html)
+
+def section_employees():
+    with closing(get_conn()) as conn:
+        rows = conn.execute("SELECT id, jmeno, pozice FROM employees ORDER BY id DESC").fetchall()
+    items = "".join([f"<li>{j} – {p or 'neuvedeno'}</li>" for _, j, p in rows]) or "<li>Žádní zaměstnanci zatím nejsou.</li>"
+    return """
+    <div class="box">
+      <h2>👷 Zaměstnanci</h2>
+      <ul>%s</ul>
+      <form class="inline" method="post" action="/pridat-zamestnance">
+        <input name="jmeno" placeholder="Jméno" required>
+        <input name="pozice" placeholder="Pozice">
+        <button type="submit">Přidat</button>
+      </form>
+    </div>
+    """ % items
+
+def section_projects():
+    with closing(get_conn()) as conn:
+        rows = conn.execute("SELECT id, nazev, zakaznik FROM projects ORDER BY id DESC").fetchall()
+    items = "".join([f"<li>{n} – {z or 'bez zákazníka'}</li>" for _, n, z in rows]) or "<li>Žádné zakázky zatím nejsou.</li>"
+    return """
+    <div class="box">
+      <h2>📋 Zakázky</h2>
+      <ul>%s</ul>
+      <form class="inline" method="post" action="/pridat-zakazku">
+        <input name="nazev" placeholder="Název zakázky" required>
+        <input name="zakaznik" placeholder="Zákazník">
+        <input name="poznamka" placeholder="Poznámka">
+        <button type="submit">Přidat</button>
+      </form>
+    </div>
+    """ % items
+
+def section_items():
+    with closing(get_conn()) as conn:
+        rows = conn.execute("SELECT id, nazev, mnozstvi, jednotka FROM items ORDER BY id DESC").fetchall()
+    items = "".join([f"<li>{n} – {m} {u}</li>" for _, n, m, u in rows]) or "<li>Žádné položky zatím nejsou.</li>"
+    return """
+    <div class="box">
+      <h2>📦 Sklad</h2>
+      <ul>%s</ul>
+      <form class="inline" method="post" action="/pridat-polozku">
+        <input name="nazev" placeholder="Název položky" required>
+        <input name="mnozstvi" placeholder="Množství" type="number" step="0.01" value="0">
+        <input name="jednotka" placeholder="Jednotka" value="ks">
+        <button type="submit">Přidat</button>
+      </form>
+    </div>
+    """ % items
+
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    with Session(engine) as session:
-        zamestnanci = get_all(session, Employee)
-        zakazky = get_all(session, Project)
-        polozky = get_all(session, Item)
+def index():
+    body = '<div class="grid">%s%s%s</div>' % (section_employees(), section_projects(), section_items())
+    return HTMLResponse(layout(body))
 
-    html = f"""
-    <!DOCTYPE html>
-    <html lang='cs'>
-    <head>
-        <meta charset='UTF-8'>
-        <title>green david app</title>
-        <style>
-            body { background-color: #f5f5f5; font-family: Arial, sans-serif; color: #ffffff; margin: 0; padding: 0; }
-            header { background-color: #9fd5b0; text-align: center; padding: 1rem; font-size: 1.8rem; font-weight: bold; }
-            main { display: flex; flex-direction: column; align-items: center; padding: 2rem; }
-            section { background-color: #9fd5b0; width: 80%; border-radius: 10px; margin-bottom: 1.5rem; padding: 1rem;
-                      box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
-            h2 { color: #ffffff; border-bottom: 1px solid #ffffff55; padding-bottom: 0.5rem; }
-            li { margin-bottom: 0.3rem; }
-            footer { text-align: center; padding: 1rem; color: #ffffffcc; font-size: 0.9rem; background-color: #9fd5b0;
-                     position: fixed; bottom: 0; width: 100%; }
-        </style>
-    </head>
-    <body>
-        <header>🌿 green david app</header>
-        <main>
-            <section>
-                <h2>👷 Zaměstnanci</h2>
-                <ul>
-                    {''.join(f'<li>{z.jmeno} – {z.pozice or "neuvedeno"}</li>' for z in zamestnanci) or '<li>Žádní zaměstnanci zatím nejsou.</li>'}
-                </ul>
-            </section>
-            <section>
-                <h2>📋 Zakázky</h2>
-                <ul>
-                    {''.join(f'<li>{p.nazev} – {p.zakaznik or "bez zákazníka"}</li>' for p in zakazky) or '<li>Žádné zakázky zatím nejsou.</li>'}
-                </ul>
-            </section>
-            <section>
-                <h2>📦 Sklad</h2>
-                <ul>
-                    {''.join(f'<li>{i.nazev} – {i.mnozstvi} {i.jednotka}</li>' for i in polozky) or '<li>Žádné položky zatím nejsou.</li>'}
-                </ul>
-            </section>
-        </main>
-        <footer>© green david s.r.o.</footer>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+# --- Actions ---
+@app.post("/pridat-zamestnance")
+def pridat_zamestnance(jmeno: str = Form(...), pozice: str | None = Form(default=None)):
+    with closing(get_conn()) as conn:
+        conn.execute("INSERT INTO employees (jmeno, pozice) VALUES (?, ?)", (jmeno, pozice))
+        conn.commit()
+    return RedirectResponse("/", status_code=303)
+
+@app.post("/pridat-zakazku")
+def pridat_zakazku(nazev: str = Form(...), zakaznik: str | None = Form(default=None), poznamka: str | None = Form(default=None)):
+    with closing(get_conn()) as conn:
+        conn.execute("INSERT INTO projects (nazev, zakaznik, poznamka) VALUES (?, ?, ?)", (nazev, zakaznik, poznamka))
+        conn.commit()
+    return RedirectResponse("/", status_code=303)
+
+@app.post("/pridat-polozku")
+def pridat_polozku(nazev: str = Form(...), mnozstvi: float = Form(default=0), jednotka: str = Form(default="ks")):
+    with closing(get_conn()) as conn:
+        conn.execute("INSERT INTO items (nazev, mnozstvi, jednotka) VALUES (?, ?, ?)", (nazev, mnozstvi, jednotka))
+        conn.commit()
+    return RedirectResponse("/", status_code=303)
