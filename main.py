@@ -4,19 +4,19 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 import sqlite3
 from contextlib import closing
 from datetime import date
-from typing import Optional
 import io
 
 try:
-    from openpyxl import Workbook
+    from openpyxl import Workbook as WB
 except Exception:
-    Workbook = None
+    WB = None
 
 APP_TITLE = "green david app"
 DB_PATH = "data.db"
 
-app = FastAPI(title=APP_TITLE, description="Správa zakázek, skladu a zaměstnanců (CZ)", version="4.0")
+app = FastAPI(title=APP_TITLE, description="Správa zakázek, skladu a zaměstnanců (CZ)", version="7.0")
 
+# ------------------ DB ------------------
 def get_conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
@@ -87,12 +87,39 @@ def init_db():
 def _startup():
     init_db()
 
+# ------------------ HTML ------------------
+def icon_svg(kind: str) -> str:
+    # minimalistické inline SVG ikony (bez externích zdrojů)
+    if kind == "projects":
+        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' "
+                "stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+                "<rect x='3' y='4' width='18' height='14' rx='2'></rect>"
+                "<line x1='7' y1='8' x2='17' y2='8'></line>"
+                "<line x1='7' y1='12' x2='17' y2='12'></line>"
+                "</svg>")
+    if kind == "stock":
+        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' "
+                "stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+                "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'></path>"
+                "<polyline points='7 10 12 15 17 10'></polyline>"
+                "<line x1='12' y1='15' x2='12' y2='3'></line>"
+                "</svg>")
+    if kind == "people":
+        return ("<svg width='18' height='18' viewBox='0 0 24 24' fill='none' "
+                "stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+                "<path d='M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2'></path>"
+                "<circle cx='9' cy='7' r='4'></circle>"
+                "<path d='M23 21v-2a4 4 0 0 0-3-3.87'></path>"
+                "<path d='M16 3.13a4 4 0 0 1 0 7.75'></path>"
+                "</svg>")
+    return ""
+
 def layout(body_html: str, subtitle: str = "") -> str:
     title = APP_TITLE if not subtitle else f"{APP_TITLE} · {subtitle}"
     with closing(get_conn()) as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key='logo_mime'").fetchone()
-        has_logo = row is not None
-    logo = f"<img src='/logo' alt='logo' style='height:28px;vertical-align:middle;margin-right:8px'>" if has_logo else "🌿"
+        has_logo = conn.execute("SELECT 1 FROM settings WHERE key='logo_mime'").fetchone() is not None
+    logo = "<img src='/logo' alt='logo' style='height:28px;vertical-align:middle;margin-right:8px'>" if has_logo else ""
+
     tpl = """
 <!DOCTYPE html>
 <html lang="cs">
@@ -102,21 +129,21 @@ def layout(body_html: str, subtitle: str = "") -> str:
   <title>{{TITLE}}</title>
   <style>
     :root {
-      --green:#e7f4ed;
-      --box:#3e4347;
-      --panel:#f3f5f7;
-      --text:#ffffff;
-      --text-dim:#ffffffcc;
+      --bg:#e7f4ed;           /* světlé pozadí stránky */
+      --box:#3e4347;          /* tmavší šedá boxy */
+      --panel:#f3f5f7;        /* světlá šedá uvnitř boxu */
+      --text-dark:#333333;    /* text na světlém pozadí */
+      --text-light:#ffffff;   /* text na tmavém pozadí */
       --accent:#69bb8a;
     }
     * { box-sizing: border-box; }
-    body { background: var(--green); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color: var(--text); margin:0; }
-    header { background: var(--box); padding:16px; text-align:center; font-weight:800; font-size:22px; display:flex; align-items:center; justify-content:center; gap:12px; }
+    body { background: var(--bg); color: var(--text-dark); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; margin:0; }
+    header { background: var(--box); color: var(--text-light); padding:16px; display:flex; align-items:center; gap:12px; justify-content:flex-start; font-weight:800; font-size:22px; }
     main { padding:24px; max-width:1200px; margin:0 auto; }
     .grid { display:grid; grid-template-columns: 1fr; gap:22px; }
     @media (min-width: 980px) { .grid { grid-template-columns: 1fr 1fr; } }
-    .box { background: var(--box); border-radius:16px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
-    h2, h3 { margin:0 0 12px; }
+    .box { background: var(--box); color: var(--text-light); border-radius:16px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+    h2, h3 { margin:0 0 12px; display:flex; align-items:center; gap:8px; }
     .panel { background: var(--panel); color:#2f3a33; border-radius:12px; padding:12px; }
     .muted { color:#2f3a33aa; }
     form.inline { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
@@ -124,8 +151,8 @@ def layout(body_html: str, subtitle: str = "") -> str:
     input::placeholder, textarea::placeholder { color:#7a7a7a; }
     button { background: var(--accent); border:none; color:#fff; padding:8px 12px; border-radius:8px; cursor:pointer; }
     button:hover { filter: brightness(0.95); }
-    a { color:#d9f5e6; text-decoration:none; font-weight:600; }
-    .footer { position:fixed; bottom:0; left:0; right:0; background: var(--box); text-align:center; color: var(--text-dim); padding:10px; }
+    a { color:#0e593b; text-decoration:none; font-weight:600; }
+    .footer { position:fixed; bottom:0; left:0; right:0; background: var(--box); color: var(--text-light); text-align:center; padding:10px; }
     table { width:100%; border-collapse:collapse; }
     th, td { padding:8px 10px; border-bottom:1px solid #00000010; text-align:left; }
     .pill { display:inline-block; background:#ffffff; padding:2px 8px; border-radius:999px; font-size:12px; color:#2f3a33; }
@@ -148,38 +175,7 @@ def layout(body_html: str, subtitle: str = "") -> str:
               .replace("{{APP_TITLE}}", APP_TITLE)\
               .replace("{{BODY_HTML}}", body_html)
 
-def employees_section():
-    with closing(get_conn()) as conn:
-        rows = conn.execute("SELECT id, jmeno, pozice FROM employees ORDER BY id DESC").fetchall()
-        sums = {row[0]: 0 for row in rows}
-        for rid in sums:
-            h = conn.execute("SELECT COALESCE(SUM(hodiny),0) FROM work_entries WHERE employee_id=?", (rid,)).fetchone()[0]
-            sums[rid] = float(h or 0)
-    if rows:
-        lis = "".join([f"<tr><td>{j}</td><td class='muted'>{p or '—'}</td><td><span class='pill'>{sums[i]:.2f} h</span></td></tr>" for i,j,p in rows])
-    else:
-        lis = "<tr><td colspan='3' class='muted'>Žádní zaměstnanci zatím nejsou.</td></tr>"
-    html = f"""
-    <div class="box">
-      <div class="topbar">
-        <h2>👷 Zaměstnanci</h2>
-        <a href="/nastaveni" class="small">Nastavení & Logo →</a>
-      </div>
-      <div class="panel">
-        <table>
-          <thead><tr><th>Jméno</th><th>Pozice</th><th>Odpracováno</th></tr></thead>
-          <tbody>{lis}</tbody>
-        </table>
-      </div>
-      <form class="inline" method="post" action="/pridat-zamestnance">
-        <input name="jmeno" placeholder="Jméno" required>
-        <input name="pozice" placeholder="Pozice">
-        <button type="submit">Přidat</button>
-      </form>
-    </div>
-    """
-    return html
-
+# ------------------ Sekce ------------------
 def projects_section():
     with closing(get_conn()) as conn:
         rows = conn.execute("SELECT id, nazev, zakaznik FROM projects ORDER BY id DESC").fetchall()
@@ -189,7 +185,7 @@ def projects_section():
         lis = "<tr><td colspan='2' class='muted'>Žádné zakázky zatím nejsou.</td></tr>"
     html = f"""
     <div class="box">
-      <h2>📋 Zakázky</h2>
+      <h2>{icon_svg('projects')} Zakázky</h2>
       <div class="panel">
         <table>
           <thead><tr><th>Název</th><th>Zákazník</th></tr></thead>
@@ -215,7 +211,7 @@ def items_section():
         lis = "<tr><td colspan='3' class='muted'>Žádné položky zatím nejsou.</td></tr>"
     html = f"""
     <div class="box">
-      <h2>📦 Sklad</h2>
+      <h2>{icon_svg('stock')} Sklad</h2>
       <div class="panel">
         <table>
           <thead><tr><th>Název</th><th>Množství</th><th>Jednotka</th></tr></thead>
@@ -232,11 +228,45 @@ def items_section():
     """
     return html
 
+def employees_section():
+    with closing(get_conn()) as conn:
+        rows = conn.execute("SELECT id, jmeno, pozice FROM employees ORDER BY id DESC").fetchall()
+        sums = {row[0]: 0 for row in rows}
+        for rid in sums:
+            h = conn.execute("SELECT COALESCE(SUM(hodiny),0) FROM work_entries WHERE employee_id=?", (rid,)).fetchone()[0]
+            sums[rid] = float(h or 0)
+    if rows:
+        lis = "".join([f"<tr><td>{j}</td><td class='muted'>{p or '—'}</td><td><span class='pill'>{sums[i]:.2f} h</span></td></tr>" for i,j,p in rows])
+    else:
+        lis = "<tr><td colspan='3' class='muted'>Žádní zaměstnanci zatím nejsou.</td></tr>"
+    html = f"""
+    <div class="box">
+      <div class="topbar">
+        <h2>{icon_svg('people')} Zaměstnanci</h2>
+        <a href="/nastaveni" class="small">Nastavení & Logo →</a>
+      </div>
+      <div class="panel">
+        <table>
+          <thead><tr><th>Jméno</th><th>Pozice</th><th>Odpracováno</th></tr></thead>
+          <tbody>{lis}</tbody>
+        </table>
+      </div>
+      <form class="inline" method="post" action="/pridat-zamestnance">
+        <input name="jmeno" placeholder="Jméno" required>
+        <input name="pozice" placeholder="Pozice">
+        <button type="submit">Přidat</button>
+      </form>
+    </div>
+    """
+    return html
+
 @app.get("/", response_class=HTMLResponse)
 def home():
-    body = "<div class='grid'>" + employees_section() + projects_section() + items_section() + "</div>"
+    # Požadované pořadí: Zakázky, Sklad, Zaměstnanci
+    body = "<div class='grid'>" + projects_section() + items_section() + employees_section() + "</div>"
     return HTMLResponse(layout(body))
 
+# ---------- Detail zakázky ----------
 @app.get("/zakazka/{pid}", response_class=HTMLResponse)
 def project_detail(pid: int):
     with closing(get_conn()) as conn:
@@ -268,7 +298,7 @@ def project_detail(pid: int):
 
     html = f"""
     <div class="box">
-      <h2>Zakázka: {p[1]}</h2>
+      <h2>{icon_svg('projects')} Zakázka: {p[1]}</h2>
       <div class="panel" style="margin-bottom:12px;">
         <div><b>Zákazník:</b> {p[2] or '—'}</div>
         <div class="muted"><b>Poznámka:</b> {p[3] or '—'}</div>
@@ -321,6 +351,7 @@ def project_detail(pid: int):
     """
     return HTMLResponse(layout(html, f"Zakázka {p[1]}"))
 
+# ---------- Actions ----------
 @app.post("/pridat-zamestnance")
 def add_employee(jmeno: str = Form(...), pozice: str = Form(default="")):
     with closing(get_conn()) as conn:
@@ -368,9 +399,10 @@ def add_hours(pid: int, datum: str = Form(...), employee_id: int = Form(...), ho
         conn.commit()
     return RedirectResponse(f"/zakazka/{pid}", status_code=303)
 
+# ---------- Export XLSX ----------
 @app.get("/zakazka/{pid}/export-xlsx")
 def export_xlsx(pid: int):
-    if Workbook is None:
+    if WB is None:
         return HTMLResponse(layout("<div class='box'>Export není dostupný – chybí knihovna openpyxl.</div>", "Export"), status_code=501)
     with closing(get_conn()) as conn:
         p = conn.execute("SELECT id, nazev FROM projects WHERE id=?", (pid,)).fetchone()
@@ -381,7 +413,6 @@ def export_xlsx(pid: int):
             WHERE we.project_id=?
             ORDER BY we.datum
         """, (pid,)).fetchall()
-    from openpyxl import Workbook as WB
     wb = WB()
     ws = wb.active
     ws.title = "Hodiny"
@@ -400,13 +431,14 @@ def export_xlsx(pid: int):
         "Content-Disposition": f"attachment; filename={filename}"
     })
 
+# ---------- Nastavení a logo ----------
 @app.get("/nastaveni", response_class=HTMLResponse)
 def settings_page():
     html = """
     <div class="box">
       <h2>Nastavení</h2>
       <div class="panel">
-        <p>Logo firmy: nahrajte PNG/JPG/SVG – bude zobrazeno v horní liště.</p>
+        <p>Logo firmy: nahrajte PNG/JPG/SVG – bude zobrazeno vlevo nahoře v horní liště.</p>
         <form method="post" action="/upload-logo" enctype="multipart/form-data">
           <input type="file" name="logo" accept="image/*" required>
           <button type="submit">Nahrát logo</button>
