@@ -85,3 +85,13 @@ def create_app():
 
 
     return app
+    # do create_app(), kde je route '/'
+from flask import send_file
+
+@app.get("/")
+def root():
+    root_index = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(root_index):
+        return send_file(root_index)
+    return app.send_static_file("index.html")
+
