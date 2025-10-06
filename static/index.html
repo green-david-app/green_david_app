@@ -1,1 +1,88 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>green david app – v17</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#0f1115; color:#e7e7e7; margin:0; padding:24px; }
+    .card { max-width:560px; margin:auto; background:#161a22; border:1px solid #222636; border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+    h1 { font-size:20px; margin:0 0 12px; }
+    label { display:block; font-size:14px; margin:8px 0 4px; color:#b9c0ce; }
+    input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2b3042; background:#0f1320; color:#e7e7e7; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    button { margin-top:12px; width:100%; padding:10px 14px; border:0; border-radius:12px; background:#2f81f7; color:white; font-weight:600; cursor:pointer; }
+    button.secondary { background:#3a3f55; }
+    pre { background:#0b0e16; border:1px solid #23283a; padding:12px; border-radius:12px; overflow:auto; }
+    .muted { color:#9aa3b2; font-size:12px; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>green david app – v17</h1>
+    <div class="muted">Backend běží. Níže můžeš rovnou vyzkoušet registraci a přihlášení.</div>
+
+    <h2>Registrace</h2>
+    <label>Email</label>
+    <input id="r_email" type="email" placeholder="např. test1@example.com" />
+    <div class="row">
+      <div>
+        <label>Heslo</label>
+        <input id="r_pass" type="password" placeholder="heslo" />
+      </div>
+      <div>
+        <label>Jméno</label>
+        <input id="r_name" type="text" placeholder="Jméno (volitelné)" />
+      </div>
+    </div>
+    <button onclick="doRegister()">Vytvořit účet</button>
+
+    <h2>Přihlášení</h2>
+    <label>Email</label>
+    <input id="l_email" type="email" placeholder="stejný email" />
+    <label>Heslo</label>
+    <input id="l_pass" type="password" placeholder="stejné heslo" />
+    <button class="secondary" onclick="doLogin()">Přihlásit</button>
+
+    <h2>Odpověď serveru</h2>
+    <pre id="out">{ "status": "čekám na akci…" }</pre>
+    <div class="muted">Healthcheck: <a href="/healthz" style="color:#7eb3ff">/healthz</a></div>
+  </div>
+
+<script>
+async function doRegister() {
+  const payload = {
+    email: (document.getElementById('r_email').value || '').trim().toLowerCase(),
+    password: document.getElementById('r_pass').value || '',
+    name: document.getElementById('r_name').value || '',
+    role: 'user'
+  };
+  await call('/auth/register', payload);
+}
+
+async function doLogin() {
+  const payload = {
+    email: (document.getElementById('l_email').value || '').trim().toLowerCase(),
+    password: document.getElementById('l_pass').value || ''
+  };
+  await call('/auth/login', payload);
+}
+
+async function call(path, body) {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => ({}));
+    document.getElementById('out').textContent =
+      JSON.stringify({ ok: res.ok, status: res.status, data }, null, 2);
+  } catch (e) {
+    document.getElementById('out').textContent = JSON.stringify({ error: String(e) }, null, 2);
+  }
+}
+</script>
+</body>
+</html>
 
