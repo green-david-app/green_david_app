@@ -43,35 +43,45 @@ def create_app():
     def root():
         return app.send_static_file("index.html")
 
-    # ---------- BOOTSTRAP DB ----------
+        # ---------- BOOTSTRAP DB ----------
     with app.app_context():
-        db.create_all()  # pro nové instalace
+        db.create_all()  # pro čisté instalace
 
-        # ✳️ Doplň chybějící sloupce do staré tabulky users (bez nutnosti ruční migrace)
+        # Bezpečná migrace staré tabulky users → doplnění chybějících sloupců
         try:
             with db.engine.begin() as conn:
-                # vytvoř tabulku pokud vůbec neexistuje
+                # 1) Vytvoř tabulku, pokud vůbec neexistuje
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS users (
                         id SERIAL PRIMARY KEY,
                         email VARCHAR(255) UNIQUE NOT NULL,
-                        password_hash VARCHAR(255) NOT NULL,
+                        password_hash VARCHAR(255),
                         name VARCHAR(255),
-                        role VARCHAR(50) NOT NULL DEFAULT 'user',
+                        role VARCHAR(50) DEFAULT 'user',
                         created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                     );
                 """))
-                # doplň chybějící sloupce (bez rozbití existujících)
+
+                # 2) Doplň chybějící sloupce (bez chyb při existenci)
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);"))
-                conn.execute(text("ALTER TABLE users ALTER COLUMN password_hash SET NOT NULL;"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);"))
-                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'user';"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user';"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"))
                 conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email);"))
-                # drobný ping, ať hned víme, že připojení funguje
+
+                # 3) Vyplň NULL hodnoty, aby šel sloupec uzamknout na NOT NULL
+                conn.execute(text("UPDATE users SET password_hash = 'legacy-null' WHERE password_hash IS NULL;"))
+                conn.execute(text("UPDATE users SET role = COALESCE(role, 'user');"))
+
+                # 4) Teď teprve NOT NULL
+                conn.execute(text("ALTER TABLE users ALTER COLUMN password_hash SET NOT NULL;"))
+                conn.execute(text("ALTER TABLE users ALTER COLUMN role SET NOT NULL;"))
+
+                # 5) Ping
                 conn.execute(text("SELECT 1;"))
         except Exception as e:
             print("DB bootstrap error:", e)
             raise
+
 
     return app
