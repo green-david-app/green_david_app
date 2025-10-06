@@ -112,3 +112,63 @@ def list_users():
          "created_at": u.created_at.isoformat() if u.created_at else None}
         for u in users
     ])
+import os
+from flask import request, jsonify
+
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+def _require_admin():
+    token = request.headers.get("X-Admin-Token", "")
+    if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+        return jsonify({"error": "Forbidden"}), 403
+    return None
+
+@auth_bp.patch("/users/<int:user_id>")
+def update_user(user_id):
+    maybe_forbidden = _require_admin()
+    if maybe_forbidden:
+        return maybe_forbidden
+
+    data = request.get_json(force=True, silent=True) or {}
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    name = data.get("name")
+    role = data.get("role")
+    password = data.get("password")
+    active = data.get("active")
+
+    if name is not None:
+        user.name = name.strip() or user.name
+    if role is not None and role.strip():
+        user.role = role.strip()
+    if password:
+        from werkzeug.security import generate_password_hash
+        user.password_hash = generate_password_hash(password)
+        # legacy 'password' column (if exists) — keep in sync
+        from sqlalchemy import text
+        db.session.execute(text("UPDATE users SET password=:p WHERE id=:i"), {"p": user.password_hash, "i": user.id})
+    if active is not None:
+        # pokud DB nemá 'active', update ignorujeme
+        from sqlalchemy import text
+        try:
+            db.session.execute(text("UPDATE users SET active=:a WHERE id=:i"), {"a": bool(active), "i": user.id})
+        except Exception:
+            pass
+
+    db.session.commit()
+    return jsonify({"message": "User updated", "id": user.id})
+
+@auth_bp.delete("/users/<int:user_id>")
+def delete_user(user_id):
+    maybe_forbidden = _require_admin()
+    if maybe_forbidden:
+        return maybe_forbidden
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"message": "User deleted", "id": user_id})
