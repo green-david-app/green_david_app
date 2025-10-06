@@ -1,125 +1,134 @@
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 import os
-from flask import Blueprint, request, jsonify
-from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-from .. import db
-from ..models import User
 
-auth_bp = Blueprint("auth", __name__)
+from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+from jose import jwt, JWTError
 
-# ---- jen ty smíš registrovat nové uživatele ----
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+from app.db import get_db
+from app.models import User
 
-def _require_admin():
-    token = request.headers.get("X-Admin-Token", "")
-    return not ADMIN_TOKEN or token != ADMIN_TOKEN  # True = zakázat
+JWT_SECRET = os.getenv("JWT_SECRET", "change-me")  # nastav v Render env
+JWT_ALG = "HS256"
+ACCESS_TOKEN_EXPIRE_MIN = 60 * 24 * 7  # 7 dní
+COOKIE_NAME = "auth"
 
-def _col_exists(table: str, col: str) -> bool:
-    q = text("""
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema='public' AND table_name = :t AND column_name = :c
-        LIMIT 1
-    """)
-    return db.session.execute(q, {"t": table, "c": col}).scalar() is not None
+COOKIE_KW = dict(
+    httponly=True,
+    secure=True,         # Render = HTTPS
+    samesite="none",     # cross-site z frontendu
+    path="/",
+    max_age=ACCESS_TOKEN_EXPIRE_MIN * 60,
+)
 
-@auth_bp.post("/register")
-def register():
-    # zamčeno admin tokenem
-    if _require_admin():
-        return jsonify({"error": "Forbidden"}), 403
+router = APIRouter(prefix="/auth", tags=["auth"])
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-    data = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-    name = (data.get("name") or "").strip()
-    role = (data.get("role") or "user").strip() or "user"
 
-    if not email or not password:
-        return jsonify({"error": "Email a heslo jsou povinné."}), 400
+class RegisterIn(BaseModel):
+    email: EmailStr
+    name: str
+    password: str
 
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    id: int
+    email: EmailStr
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+def hash_pw(pw: str) -> str:
+    return pwd_ctx.hash(pw)
+
+
+def verify_pw(pw: str, hashed: str) -> bool:
+    return pwd_ctx.verify(pw, hashed)
+
+
+def make_access_token(sub: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": sub,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MIN)).timestamp()),
+        "type": "access",
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+
+
+def set_auth_cookie(resp: Response, token: str) -> None:
+    resp.set_cookie(COOKIE_NAME, token, **COOKIE_KW)
+
+
+def clear_auth_cookie(resp: Response) -> None:
+    resp.delete_cookie(COOKIE_NAME, path=COOKIE_KW["path"], samesite=COOKIE_KW["samesite"])
+
+
+def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token: Optional[str] = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
-        existed = db.session.execute(
-            text("SELECT id FROM users WHERE email = :email LIMIT 1"),
-            {"email": email}
-        ).scalar()
+        payload = decode_token(token)
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-        has_legacy_password = _col_exists("users", "password")
-        has_active = _col_exists("users", "active")
+    email = payload.get("sub")
+    user: Optional[User] = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
 
-        cols = ["email", "password_hash", "name", "role"]
-        vals = [":email", ":ph", "NULLIF(:name,'')", "COALESCE(NULLIF(:role,''),'user')"]
-        updates = [
-            "password_hash = EXCLUDED.password_hash",
-            "name = COALESCE(NULLIF(EXCLUDED.name,''), users.name)",
-            "role = COALESCE(NULLIF(EXCLUDED.role,''), users.role)",
-        ]
-        params = {
-            "email": email,
-            "ph": generate_password_hash(password),
-            "name": name,
-            "role": role,
-        }
 
-        if has_legacy_password:
-            cols.insert(1, "password")
-            vals.insert(1, ":pw_legacy")
-            updates.insert(0, "password = EXCLUDED.password")
-            params["pw_legacy"] = params["ph"]
+@router.post("/register", response_model=UserOut)
+def register(body: RegisterIn, response: Response, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == body.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
 
-        if has_active:
-            cols.append("active")
-            vals.append(":active")
-            params["active"] = True
+    user = User(email=body.email, name=body.name, password_hash=hash_pw(body.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
 
-        sql = f"""
-            INSERT INTO users ({", ".join(cols)})
-            VALUES ({", ".join(vals)})
-            ON CONFLICT (email) DO UPDATE SET
-                {", ".join(updates)}
-            RETURNING id
-        """
-        user_id = db.session.execute(text(sql), params).scalar()
-        db.session.commit()
+    token = make_access_token(user.email)
+    set_auth_cookie(response, token)
+    return user
 
-        return jsonify(
-            {"message": ("Účet aktualizován." if existed else "Uživatel vytvořen."), "id": user_id}
-        ), (200 if existed else 201)
 
-    except IntegrityError as e:
-        db.session.rollback()
-        return jsonify({"error": "Konflikt dat", "detail": str(e)}), 409
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": "Server error", "detail": str(e)}), 500
+@router.post("/login")
+def login(body: LoginIn, response: Response, db: Session = Depends(get_db)):
+    user: Optional[User] = db.query(User).filter(User.email == body.email).first()
+    if not user or not verify_pw(body.password, user.password_hash):
+        # 401 pro špatné přihlášení (ne 403)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-@auth_bp.post("/login")
-def login():
-    data = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-    if not email or not password:
-        return jsonify({"error": "Email a heslo jsou povinné."}), 400
+    token = make_access_token(user.email)
+    set_auth_cookie(response, token)
+    return {"ok": True}
 
-    user = User.query.filter_by(email=email).first()
-    if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({"error": "Neplatné přihlašovací údaje."}), 401
 
-    return jsonify({
-        "message": "Přihlášení úspěšné.",
-        "user": {"id": user.id, "email": user.email, "name": user.name, "role": user.role}
-    }), 200
+@router.post("/logout")
+def logout(response: Response):
+    clear_auth_cookie(response)
+    return {"ok": True}
 
-@auth_bp.get("/users")
-def list_users():
-    # seznam nechám taky jen pro tebe; když chceš veřejný, tuhle podmínku smaž
-    if _require_admin():
-        return jsonify({"error": "Forbidden"}), 403
 
-    users = User.query.order_by(User.id).all()
-    return jsonify([
-        {"id": u.id, "email": u.email, "name": u.name, "role": u.role,
-         "created_at": u.created_at.isoformat() if u.created_at else None}
-        for u in users
-    ])
+@router.get("/me", response_model=UserOut)
+def me(user: User = Depends(current_user)):
+    return user
