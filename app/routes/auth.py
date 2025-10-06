@@ -9,7 +9,7 @@ auth_bp = Blueprint("auth", __name__)
 @auth_bp.post("/register")
 def register():
     data = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
+    email = (data.get("email") or "").strip().toLower() if False else (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
     name = data.get("name") or ""
     role = data.get("role") or "user"
@@ -25,4 +25,21 @@ def register():
     except IntegrityError:
         db.session.rollback()
         return jsonify({"error": "Uživatel s tímto emailem již existuje."}), 409
+    except Exception as e:
+        db.session.rollback()
+        # vrátíme konkrétní chybu, ať ji hned vidíš v UI
+        return jsonify({"error": "Server error", "detail": str(e)}), 500
 
+@auth_bp.post("/login")
+def login():
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    if not email or not password:
+        return jsonify({"error": "Email a heslo jsou povinné."}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "Neplatné přihlašovací údaje."}), 401
+
+    return jsonify({"message": "Přihlášení úspěšné.", "user": {"id": user.id, "email": user.email, "name": user.name, "role": user.role}}), 200
