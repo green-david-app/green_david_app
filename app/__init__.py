@@ -33,12 +33,12 @@ def create_app():
     from .routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
 
-    # ---------- HEALTH ----------
+        # --- HEALTHCHECK pro Render ---
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "version": "v17+psycopg3"}
 
-    # ---------- ROOT → statický index ----------
+    # --- KOŘENOVÁ STRÁNKA: statický index ---
     @app.get("/")
     def root():
         return app.send_static_file("index.html")
