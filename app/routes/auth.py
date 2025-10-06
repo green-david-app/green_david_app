@@ -17,6 +17,20 @@ def register():
     if not email or not password:
         return jsonify({"error": "Email a heslo jsou povinné."}), 400
 
+    # ➜ Když už existuje účet (ze staré verze), “upgraduj” ho
+    existing = User.query.filter_by(email=email).first()
+    if existing:
+        if not existing.password_hash or existing.password_hash in ("", "legacy-null"):
+            existing.password_hash = generate_password_hash(password)
+            if name:
+                existing.name = name
+            if not existing.role:
+                existing.role = role
+            db.session.commit()
+            return jsonify({"message": "Účet doplněn (upgradován).", "id": existing.id}), 200
+        return jsonify({"error": "Uživatel s tímto emailem již existuje."}), 409
+
+    # ➜ Jinak vytvoř nový účet
     try:
         user = User(email=email, password_hash=generate_password_hash(password), name=name, role=role)
         db.session.add(user)
@@ -27,7 +41,6 @@ def register():
         return jsonify({"error": "Uživatel s tímto emailem již existuje."}), 409
     except Exception as e:
         db.session.rollback()
-        # vrátíme detail, ať je hned vidět, co přesně padá (např. 'relation "users" does not exist')
         return jsonify({"error": "Server error", "detail": str(e)}), 500
 
 @auth_bp.post("/login")
@@ -45,3 +58,11 @@ def login():
     return jsonify({"message": "Přihlášení úspěšné.", "user": {
         "id": user.id, "email": user.email, "name": user.name, "role": user.role
     }}), 200
+
+@auth_bp.get("/users")
+def list_users():
+    users = User.query.order_by(User.id).all()
+    return jsonify([
+        {"id": u.id, "email": u.email, "name": u.name, "role": u.role, "created_at": u.created_at.isoformat() if u.created_at else None}
+        for u in users
+    ])
