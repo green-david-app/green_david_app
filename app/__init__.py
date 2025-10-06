@@ -6,7 +6,7 @@ from sqlalchemy import text
 db = SQLAlchemy()
 
 def create_app():
-    # static/ je v kořeni repa
+    # static je v KOŘENI repa
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     STATIC_DIR = os.path.join(BASE_DIR, "static")
 
@@ -19,8 +19,6 @@ def create_app():
         database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
     elif database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-
-    # Render Postgres obvykle vyžaduje SSL. Pokud není v URL, přilepíme ho.
     if database_url.startswith("postgresql+psycopg://") and "sslmode=" not in database_url:
         sep = "&" if "?" in database_url else "?"
         database_url = f"{database_url}{sep}sslmode=require"
@@ -30,29 +28,50 @@ def create_app():
 
     db.init_app(app)
 
-    # modely + blueprinty
+    # ---------- MODELY & ROUTY ----------
     from . import models  # noqa: F401
     from .routes.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix="/auth")
 
-    # healthz (základní)
+    # ---------- HEALTH ----------
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "version": "v17+psycopg3"}
 
-    # root -> statický index
+    # ---------- ROOT → statický index ----------
     @app.get("/")
     def root():
         return app.send_static_file("index.html")
 
-    # první bootstrap tabulek + ověření DB připojení
+    # ---------- BOOTSTRAP DB ----------
     with app.app_context():
-        db.create_all()
+        db.create_all()  # pro nové instalace
+
+        # ✳️ Doplň chybějící sloupce do staré tabulky users (bez nutnosti ruční migrace)
         try:
-            db.session.execute(text("SELECT 1"))
+            with db.engine.begin() as conn:
+                # vytvoř tabulku pokud vůbec neexistuje
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        password_hash VARCHAR(255) NOT NULL,
+                        name VARCHAR(255),
+                        role VARCHAR(50) NOT NULL DEFAULT 'user',
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    );
+                """))
+                # doplň chybějící sloupce (bez rozbití existujících)
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);"))
+                conn.execute(text("ALTER TABLE users ALTER COLUMN password_hash SET NOT NULL;"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'user';"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW();"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email);"))
+                # drobný ping, ať hned víme, že připojení funguje
+                conn.execute(text("SELECT 1;"))
         except Exception as e:
-            # selže-li připojení (např. kvůli SSL), uvidíš to v Render logs
-            print("DB connectivity error:", e)
+            print("DB bootstrap error:", e)
             raise
 
     return app
