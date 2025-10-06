@@ -1,8 +1,4 @@
-fastapi
-uvicorn
-python-multipart
-sqlalchemy
-pydantic
-passlib[bcrypt]
-python-jose
+Flask>=3.0.0
+Werkzeug>=3.0.0
+openpyxl
 gunicorn
