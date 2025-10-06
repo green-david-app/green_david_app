@@ -9,4 +9,3 @@ class User(db.Model):
     name = db.Column(db.String(255), nullable=True)
     role = db.Column(db.String(50), default="user", nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
