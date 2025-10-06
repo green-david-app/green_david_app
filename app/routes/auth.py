@@ -28,50 +28,55 @@ def register():
         return jsonify({"error": "Email a heslo jsou povinné."}), 400
 
     try:
-        # Zjistíme, zda e-mail už existuje (kvůli návratovému kódu 200/201)
+        # existuje už záznam?
         existed = db.session.execute(
             text("SELECT id FROM users WHERE email = :email LIMIT 1"),
             {"email": email}
         ).scalar()
 
-        # Legacy sloupce ve staré tabulce?
-        has_legacy_password = _col_exists("users", "password")
+        has_legacy_password = _col_exists("users", "password")  # starý sloupec
+        has_active = _col_exists("users", "active")             # legacy NOT NULL sloupec
 
-        # Připravíme dynamický UPSERT
-        columns = ["email", "password_hash", "name", "role"]
-        values  = [":email", ":ph", "NULLIF(:name,'')", "COALESCE(NULLIF(:role,''),'user')"]
+        cols = ["email", "password_hash", "name", "role"]
+        vals = [":email", ":ph", "NULLIF(:name,'')", "COALESCE(NULLIF(:role,''),'user')"]
         updates = [
             "password_hash = EXCLUDED.password_hash",
             "name = COALESCE(NULLIF(EXCLUDED.name,''), users.name)",
-            "role = COALESCE(NULLIF(EXCLUDED.role,''), users.role)"
+            "role = COALESCE(NULLIF(EXCLUDED.role,''), users.role)",
         ]
         params = {
             "email": email,
             "ph": generate_password_hash(password),
             "name": name,
-            "role": role
+            "role": role,
         }
 
-        # Pokud existuje legacy sloupec "password" (NOT NULL ve starém schématu),
-        # naplníme ho také (hashovanou hodnotou), aby insert nepadal.
+        # doplň starý sloupec "password" (NOT NULL ve starém schématu)
         if has_legacy_password:
-            columns.insert(1, "password")
-            values.insert(1, ":pw_legacy")
-            updates.insert(0, "password = EXCLUDED.password")
+            cols.insert(1, "password")
+            vals.insert(1, ":pw_legacy")
+            updates.insert(0, "password = EXCLUDED.password")  # při update zachováme/aktualizujeme hash
             params["pw_legacy"] = params["ph"]
 
+        # doplň legacy sloupec "active" (NOT NULL, bez defaultu) – nastavíme TRUE při insertu
+        if has_active:
+            cols.append("active")
+            vals.append(":active")
+            params["active"] = True  # boolean True
+
         sql = f"""
-            INSERT INTO users ({", ".join(columns)})
-            VALUES ({", ".join(values)})
+            INSERT INTO users ({", ".join(cols)})
+            VALUES ({", ".join(vals)})
             ON CONFLICT (email) DO UPDATE SET
                 {", ".join(updates)}
             RETURNING id
         """
-
         user_id = db.session.execute(text(sql), params).scalar()
         db.session.commit()
 
-        return jsonify({"message": ("Účet aktualizován." if existed else "Uživatel vytvořen."), "id": user_id}), (200 if existed else 201)
+        return jsonify(
+            {"message": ("Účet aktualizován." if existed else "Uživatel vytvořen."), "id": user_id}
+        ), (200 if existed else 201)
 
     except IntegrityError as e:
         db.session.rollback()
