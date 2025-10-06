@@ -17,21 +17,18 @@ def register():
     if not email or not password:
         return jsonify({"error": "Email a heslo jsou povinné."}), 400
 
-    # ➜ Když už existuje účet (ze staré verze), “upgraduj” ho
+    # UPSERT: existuje? -> update; jinak -> create
     existing = User.query.filter_by(email=email).first()
-    if existing:
-        if not existing.password_hash or existing.password_hash in ("", "legacy-null"):
+    try:
+        if existing:
             existing.password_hash = generate_password_hash(password)
             if name:
                 existing.name = name
             if not existing.role:
                 existing.role = role
             db.session.commit()
-            return jsonify({"message": "Účet doplněn (upgradován).", "id": existing.id}), 200
-        return jsonify({"error": "Uživatel s tímto emailem již existuje."}), 409
+            return jsonify({"message": "Účet aktualizován.", "id": existing.id}), 200
 
-    # ➜ Jinak vytvoř nový účet
-    try:
         user = User(email=email, password_hash=generate_password_hash(password), name=name, role=role)
         db.session.add(user)
         db.session.commit()
@@ -63,6 +60,7 @@ def login():
 def list_users():
     users = User.query.order_by(User.id).all()
     return jsonify([
-        {"id": u.id, "email": u.email, "name": u.name, "role": u.role, "created_at": u.created_at.isoformat() if u.created_at else None}
+        {"id": u.id, "email": u.email, "name": u.name, "role": u.role,
+         "created_at": u.created_at.isoformat() if u.created_at else None}
         for u in users
     ])
