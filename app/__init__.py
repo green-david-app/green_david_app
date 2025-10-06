@@ -1,2 +1,2 @@
 # app/__init__.py
-# FastAPI verze: tento soubor stačí nechat prázdný.
+# FastAPI verze: tento soubor necháváme prázdný (žádný Flask).
