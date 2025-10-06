@@ -1,19 +1,13 @@
-# green-david-app – fix multi-user registration
+# green_david_app (fixed)
 
-## Quick start (local)
-```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
-```
+Opravené soubory pro Render:
+- Opraven překlep `sqlalchmy` → `sqlalchemy` (v importu `from sqlalchemy.exc import IntegrityError`).
+- Doplněn `requirements.txt` se závislostmi včetně `SQLAlchemy` a `Flask-SQLAlchemy`.
+- Přidán `Procfile` s příkazem `web: gunicorn main:app`.
+- Minimalní struktura Flask aplikace s registrací a přihlášením.
 
-### Test
-```bash
-curl -X POST http://127.0.0.1:5000/api/register -H "Content-Type: application/json"   -d '{"username":"david","email":"david@example.com","password":"heslo123"}'
-```
-
-## Render
-- Set `START_CMD` to `gunicorn main:app` or `python main.py`
-- Optional `DATABASE_URL` env var (Postgres). If not set, SQLite `app.db` is used.
-- The app creates `static/uploads` automatically.
+## Nasazení na Render
+1. Nahrajte ZIP tohoto repozitáře.
+2. Build command: `pip install -r requirements.txt`
+3. Start command: `gunicorn main:app`
+4. Databáze: připojte Render PostgreSQL (proměnná `DATABASE_URL` se vytvoří automaticky).
