@@ -1,24 +1,19 @@
-import os, io, base64, re, secrets, uuid
+import os, io, base64, re, uuid
 from flask import Flask, request, send_from_directory, jsonify, send_file
 from flask_session import Session
-from sqlalchemy import select, delete, update
-from sqlalchemy.orm import Session as DBSession
+from sqlalchemy import select, delete, update, func
 from database import engine, SessionLocal, Base
 from models import User, Job, Employee, Task, Timesheet, Material, Tool, WarehouseItem, JobAssignment, Photo
 from openpyxl import Workbook
 
-APP_TITLE = "green david app"
-
 def create_app():
     app = Flask(__name__, static_folder=None)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY","admin123")
-    app.config["SESSION_TYPE"] = "filesystem"  # simple persistent cookie sessions; swap to sqlalchemy if wanted
+    app.config["SESSION_TYPE"] = "filesystem"
     Session(app)
 
-    # create tables
+    # --- Create tables & seed admin on first run ---
     Base.metadata.create_all(bind=engine)
-
-    # seed default admin if not exists
     with SessionLocal() as db:
         if not db.scalar(select(User).where(User.email=="admin@greendavid.local")):
             db.add(User(email="admin@greendavid.local", name="Admin", role="admin", password="admin123", active=True))
@@ -41,9 +36,9 @@ def create_app():
     def logo_svg():
         return send_from_directory(".", "logo.svg") if os.path.exists("logo.svg") else ("",404)
 
-    @app.get("/uploads/<path:fname>")
-    def uploads(fname):
-        return send_from_directory("static/uploads", fname)
+    @app.get("/api/health")
+    def health():
+        return {"ok": True}
 
     # ---- Auth ----
     def current_user():
@@ -51,7 +46,7 @@ def create_app():
         if not uid:
             return None
         try:
-            uid=int(uid)
+            uid = int(uid)
         except:
             return None
         with SessionLocal() as db:
@@ -61,10 +56,13 @@ def create_app():
     def api_me():
         u = current_user()
         if not u:
-            return jsonify({"authenticated": False})
+            # return unauth but don't crash
+            with SessionLocal() as db:
+                tasks_total = db.scalar(select(func.count()).select_from(Task)) or 0
+            return jsonify({"authenticated": False, "tasks_count": int(tasks_total)})
         with SessionLocal() as db:
-            count = db.scalar(select(Task).count()) or 0
-        return jsonify({"authenticated": True, "user":{"id":u.id,"email":u.email,"name":u.name,"role":u.role}, "tasks_count": count})
+            tasks_total = db.scalar(select(func.count()).select_from(Task)) or 0
+        return jsonify({"authenticated": True, "user":{"id":u.id,"email":u.email,"name":u.name,"role":u.role}, "tasks_count": int(tasks_total)})
 
     @app.post("/api/login")
     def api_login():
@@ -171,7 +169,7 @@ def create_app():
             db.commit()
         return jsonify({"ok": True})
 
-    # photos: store to local uploads (ephemeral, but UI works)
+    # photos saved locally (ephemeral) – UI support only
     @app.post("/api/jobs/<int:jid>/photos")
     def add_photo(jid:int):
         j = request.get_json(force=True)
@@ -256,7 +254,6 @@ def create_app():
             if job_id: q = q.where(Timesheet.job_id==int(job_id))
             if employee_id: q = q.where(Timesheet.employee_id==int(employee_id))
             rows = db.scalars(q).all()
-            # join helpers
             job_map = {j.id:j.title for j in db.scalars(select(Job)).all()}
             emp_map = {e.id:e.name for e in db.scalars(select(Employee)).all()}
             return jsonify({"rows":[{"id":r.id,"job_id":r.job_id,"employee_id":r.employee_id,"employee_name":emp_map.get(r.employee_id),"job_title":job_map.get(r.job_id),"date":r.date,"hours":float(r.hours),"place":r.place,"activity":r.activity} for r in rows]})
@@ -298,66 +295,6 @@ def create_app():
         with SessionLocal() as db:
             db.execute(delete(WarehouseItem).where(WarehouseItem.id==iid)); db.commit()
         return jsonify({"ok":True})
-
-    # ---- Users (admin only endpoints kept simple) ----
-    @app.get("/api/users")
-    def list_users():
-        with SessionLocal() as db:
-            rows = db.scalars(select(User).order_by(User.id)).all()
-            return jsonify({"users":[{"id":u.id,"email":u.email,"name":u.name,"role":u.role,"active":u.active} for u in rows]})
-
-    @app.post("/api/users")
-    def create_user():
-        j = request.get_json(force=True)
-        with SessionLocal() as db:
-            u = User(email=j["email"].lower(), name=j["name"], role=j.get("role","worker"), password=j.get("password","changeme"), active=True)
-            db.add(u); db.commit(); db.refresh(u)
-            return jsonify({"id": u.id})
-
-    @app.patch("/api/users")
-    def update_user():
-        j = request.get_json(force=True)
-        uid = int(j["id"])
-        values = {}
-        if "role" in j: values["role"] = j["role"]
-        if "active" in j: values["active"] = bool(j["active"])
-        with SessionLocal() as db:
-            db.execute(update(User).where(User.id==uid).values(**values)); db.commit()
-        return jsonify({"ok":True})
-
-    # ---- Export routes ----
-    @app.get("/export/warehouse.xlsx")
-    def export_warehouse():
-        wb = Workbook(); ws = wb.active; ws.title = "Warehouse"
-        ws.append(["ID","Site","Category","Name","Qty","Unit"])
-        with SessionLocal() as db:
-            for r in db.scalars(select(WarehouseItem).order_by(WarehouseItem.site, WarehouseItem.category, WarehouseItem.name)).all():
-                ws.append([r.id, r.site, r.category, r.name, float(r.qty), r.unit])
-        bio = io.BytesIO(); wb.save(bio); bio.seek(0)
-        return send_file(bio, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="warehouse.xlsx")
-
-    @app.get("/export/job_materials.xlsx")
-    def export_job_materials():
-        job_id = int(request.args.get("job_id"))
-        wb = Workbook(); ws = wb.active; ws.title = "Materials"
-        ws.append(["Name","Qty","Unit"])
-        with SessionLocal() as db:
-            for m in db.scalars(select(Material).where(Material.job_id==job_id)).all():
-                ws.append([m.name, float(m.qty), m.unit])
-        bio = io.BytesIO(); wb.save(bio); bio.seek(0)
-        return send_file(bio, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="job_materials.xlsx")
-
-    @app.get("/export/employee_hours.xlsx")
-    def export_employee_hours():
-        employee_id = int(request.args.get("employee_id"))
-        wb = Workbook(); ws = wb.active; ws.title = "Hours"
-        ws.append(["Date","Hours","Job","Place","Activity"])
-        with SessionLocal() as db:
-            job_map = {j.id:j.title for j in db.scalars(select(Job)).all()}
-            for r in db.scalars(select(Timesheet).where(Timesheet.employee_id==employee_id).order_by(Timesheet.date)).all():
-                ws.append([r.date, float(r.hours), job_map.get(r.job_id, ""), r.place or "", r.activity or ""])
-        bio = io.BytesIO(); wb.save(bio); bio.seek(0)
-        return send_file(bio, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="employee_hours.xlsx")
 
     return app
 
