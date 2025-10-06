@@ -1,11 +1,14 @@
-from sqlmodel import SQLModel, create_engine, Session
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = "sqlite:///./data.db"
-engine = create_engine(DATABASE_URL, echo=False)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    # allow local dev with SQLite fallback
+    DATABASE_URL = "sqlite:///./local.db"
 
-def init_db():
-    SQLModel.metadata.create_all(engine)
+class Base(DeclarativeBase):
+    pass
 
-def get_session():
-    with Session(engine) as session:
-        yield session
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
