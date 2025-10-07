@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>green david app</title>
+    <link rel="stylesheet" href="/style.css"/>
+  </head>
+  <body>
+    <header class="header">
+      <div class="brand">
+        <img src="/logo.jpg" alt="Green David" class="brand-logo" onerror="this.src='/logo.svg'"/>
+        <div>
+          <div class="brand-title">green david app</div>
+          <div class="brand-sub">interní systém</div>
+        </div>
+        <div class="right small" id="userbox"></div>
+      </div>
+    </header>
+
+    <main class="container">
+      <div id="app"></div>
+      <div id="js-error" class="error-overlay" style="display:none"></div>
+      <p class="small footer">© green david s.r.o.</p>
+    </main>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script>
+      function showJSError(msg){
+        var el = document.getElementById('js-error');
+        el.style.display = 'block';
+        el.textContent = String(msg || 'Neznámá chyba ve skriptu.');
+        console.error(msg);
+      }
+      window.addEventListener('error', function(e){ showJSError(e.error ? (e.error.stack||e.error) : (e.message||e)); });
+      window.addEventListener('unhandledrejection', function(e){ showJSError(e.reason ? (e.reason.stack||e.reason) : e); });
+      async function api(path, opts={}){
+        const res = await fetch(path, {credentials:"same-origin", headers:{"Content-Type":"application/json"}, ...opts});
+        if(!res.ok){ let msg = res.statusText; try{ const j = await res.json(); msg = j.error || msg; }catch{} throw new Error(msg); }
+        try{ return await res.json(); }catch{return {};}
+      }
+      async function refreshUserBox(){
+        const box = document.getElementById("userbox");
+        try{
+          const j = await api("/api/me");
+          if(j.authenticated){
+            box.innerHTML = `Přihlášen: <b>${j.user.name}</b> (${j.user.role}) • Úkoly: <b>${j.tasks_count}</b> &nbsp; <button class="ghost" id="logout-btn">Odhlásit</button>`;
+            document.getElementById("logout-btn").onclick = async ()=>{ await api("/api/logout",{method:"POST"}); location.reload(); };
+          } else {
+            box.innerHTML = '<span>Nepřihlášen</span>';
+          }
+        }catch(e){ box.innerText = ""; }
+      }
+    </script>
+
+    <script type="text/babel" data-presets="env,react">
+      const { useState, useEffect, useMemo } = React;
+
+      function Login({onLogged}){
+        const [email,setEmail]=useState(""); const [pass,setPass]=useState(""); const [err,setErr]=useState("");
+        async function submit(e){ e.preventDefault(); setErr(""); try{ await api("/api/login",{method:"POST", body: JSON.stringify({email, password:pass})}); onLogged(); }catch(e){ setErr("Špatný e‑mail nebo heslo"); } }
+        return (<div className="card" style={{maxWidth:460, margin:"40px auto"}}><div className="card-h"><div>Přihlášení</div></div><div className="card-c">
+          <form onSubmit={submit}><div className="form-row"><input type="email" placeholder="E‑mail" value={email} onChange={e=>setEmail(e.target.value)} required style={{flex:1}}/></div>
+          <div className="form-row"><input type="password" placeholder="Heslo" value={pass} onChange={e=>setPass(e.target.value)} required style={{flex:1}}/></div>
+          {err && <div className="small" style={{color:"#ffbcbc"}}>{err}</div>}<div className="form-row" style={{justifyContent:"flex-end"}}><button type="submit">Přihlásit</button></div>
+          <div className="small">Výchozí admin: <b>admin@greendavid.local</b> / <b>admin123</b>.</div></form></div></div>);
+      }
+
+      function Tabs({value,onChange,canAdmin,taskCount}){
+        const items=[{key:"jobs",label:"Zakázky"},{key:"tasks",label:"Úkoly"+(taskCount? " ("+taskCount+")": "")},{key:"employees",label:"Zaměstnanci"},{key:"warehouse",label:"Sklad"},...(canAdmin?[{key:"users",label:"Uživatelé"}]:[])];
+        return <div className="tabs">{items.map(it=>(<div key={it.key} className={"tab"+(it.key===value?" active":"")} onClick={()=>onChange(it.key)}>{it.label}</div>))}</div>;
+      }
+
+      function JobsList({onOpen}){
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({title:"",client:"",status:"Plán",city:"",code:"",date:"",note:""});
+        const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/jobs"); setList(j.jobs||[]); }catch(e){ setErr(e.message);} }
+        useEffect(()=>{ load().catch(()=>{}); },[]);
+        async function add(e){ e.preventDefault(); try{ await api("/api/jobs",{method:"POST",body:JSON.stringify(form)}); setForm({title:"",client:"",status:"Plán",city:"",code:"",date:"",note:""}); load(); }catch(e){ setErr(e.message);} }
+        async function del(id){ if(!confirm("Smazat zakázku?")) return; await api("/api/jobs?id="+id,{method:"DELETE"}); load(); }
+        return (<div className="grid" style={{gridTemplateColumns:"1fr"}}>
+          <div className="card"><div className="card-h"><div>Nová zakázka</div></div><div className="card-c">
+            <form onSubmit={add}><div className="form-row">
+              <input placeholder="Název" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} style={{flex:2}} required/>
+              <input placeholder="Zákazník" value={form.client} onChange={e=>setForm({...form,client:e.target.value})} style={{flex:2}} required/>
+              <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option>Plán</option><option>Probíhá</option><option>Dokončeno</option></select>
+            </div><div className="form-row">
+              <input placeholder="Město" value={form.city} onChange={e=>setForm({...form,city:e.target.value})} required/>
+              <input placeholder="Kód (např. 2025-091)" value={form.code} onChange={e=>setForm({...form,code:e.target.value})} required/>
+              <input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} required/>
+            </div><div className="form-row">
+              <input placeholder="Poznámka" value={form.note} onChange={e=>setForm({...form,note:e.target.value})} style={{flex:1}}/>
+              <button type="submit">Přidat</button>
+            </div></form>{err && <div className="small" style={{color:"#ffbcbc"}}>{err}</div>}</div></div>
+          {list.map(z=> (<div className="card" key={z.id}><div className="card-h"><div><div style={{fontWeight:700}}><span className="linklike" onClick={()=> onOpen(z.id)}>{z.title}</span></div><div className="small">{z.client} • {z.city} • {z.code}</div></div><span className="badge">{z.status}</span></div>
+            <div className="card-c"><div className="kv small"><span>📅</span> <span>{z.date}</span></div><div style={{marginTop:12, display:"flex", gap:8}}>
+              <button onClick={()=> onOpen(z.id)}>Otevřít detail</button><button className="ghost" onClick={()=> del(z.id)}>Smazat</button></div></div></div>))}
+          {list.length===0 && <div className="card"><div className="card-c small">Zatím žádné zakázky – přidej první výše.</div></div>}
+        </div>);
+      }
+
+      function PhotoUploader({jobId,onUploaded}){
+        function compressAndSend(file){
+          var reader = new FileReader();
+          reader.onload = function(){
+            var img = new Image();
+            img.onload = async function(){
+              var maxSide = 1600, quality = 0.82;
+              var scale = (img.width>img.height) ? maxSide/img.width : maxSide/img.height;
+              var w = Math.min(maxSide, Math.round(img.width*scale));
+              var h = Math.min(maxSide, Math.round(img.height*scale));
+              var c = document.createElement("canvas"); c.width=w; c.height=h;
+              var ctx = c.getContext("2d"); ctx.drawImage(img,0,0,w,h);
+              var dataUrl = c.toDataURL("image/jpeg", quality);
+              await api(`/api/jobs/${jobId}/photos`, {method:"POST", body: JSON.stringify({data_url:dataUrl})});
+              onUploaded && onUploaded();
+            };
+            img.src = reader.result;
+          };
+          reader.readAsDataURL(file);
+        }
+        return (<label><input type="file" accept="image/*" onChange={e=>{ var f=e.target.files && e.target.files[0]; if(f) compressAndSend(f); }}/><button className="ghost">Nahrát fotku</button></label>);
+      }
+
+      function JobTasks({jobId}){
+        const [list,setList]=useState([]);
+        const [employees,setEmployees]=useState([]);
+        const [form,setForm]=useState({title:"",description:"",due_date:"",employee_id:""});
+        async function load(){ try{ const [t,e]=await Promise.all([api("/api/tasks?job_id="+jobId), api("/api/employees")]); setList(t.tasks||[]); setEmployees(e.employees||[]); }catch(e){ console.error(e);} }
+        useEffect(()=>{ load().catch(()=>{}); },[jobId]);
+        async function add(e){ e.preventDefault(); await api("/api/tasks",{method:"POST",body:JSON.stringify({...form, job_id: jobId || null})}); setForm({title:"",description:"",due_date:"",employee_id:""}); load(); }
+        async function setStatus(t, status){ await api("/api/tasks",{method:"PATCH",body:JSON.stringify({id:t.id,status})}); load(); }
+        async function del(t){ if(!confirm("Smazat úkol?")) return; await api("/api/tasks?id="+t.id,{method:"DELETE"}); load(); }
+        return (<div className="card"><div className="card-h"><div>Úkoly zakázky</div></div><div className="card-c">
+          <form onSubmit={add}><div className="form-row">
+            <input placeholder="Nadpis úkolu" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} required style={{flex:2}}/>
+            <input placeholder="Do kdy (YYYY-MM-DD)" value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/>
+            <select value={form.employee_id} onChange={e=>setForm({...form,employee_id:e.target.value})}><option value="">Nepřiřazovat</option>{employees.map(emp=>(<option key={emp.id} value={emp.id}>{emp.name}</option>))}</select>
+            <button type="submit">Přidat</button>
+          </div><div className="form-row"><input placeholder="Popis" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} style={{flex:1}}/></div></form>
+          <table className="table"><thead><tr><th>Stav</th><th>Název</th><th>Přiřazeno</th><th>Termín</th><th></th></tr></thead><tbody>
+            {list.map(t=>(<tr key={t.id}><td><span className="badge">{t.status}</span></td><td>{t.title}</td><td>{t.employee_id || "-"}</td><td>{t.due_date || "-"}</td><td className="small">
+              <button className="ghost" onClick={()=>setStatus(t,"nový")}>nový</button><button className="ghost" onClick={()=>setStatus(t,"probíhá")}>probíhá</button><button className="ghost" onClick={()=>setStatus(t,"hotovo")}>hotovo</button><button className="ghost" onClick={()=>del(t)}>smazat</button></td></tr>))}
+          </tbody></table>{list.length===0 && <div className="small">Žádné úkoly.</div>}</div></div>);
+      }
+
+      function JobHours({jobId}){
+        const [rows,setRows]=useState([]);
+        const [employees,setEmployees]=useState([]);
+        const [form,setForm]=useState({employee_id:"",date:"",hours:0,place:"",activity:""});
+        async function load(){ try{ const [h,e]=await Promise.all([api("/api/timesheets?job_id="+jobId), api("/api/employees")]); setRows(h.rows||[]); setEmployees(e.employees||[]);}catch(e){ console.error(e);} }
+        useEffect(()=>{ load().catch(()=>{}); },[jobId]);
+        async function add(e){ e.preventDefault(); await api("/api/timesheets",{method:"POST",body:JSON.stringify({job_id:jobId, ...form})}); setForm({employee_id:"",date:"",hours:0,place:"",activity:""}); load(); }
+        async function del(id){ if(!confirm("Smazat záznam?")) return; await api("/api/timesheets?id="+id,{method:"DELETE"}); load(); }
+        return (<div className="card"><div className="card-h"><div>Hodiny na zakázce</div></div><div className="card-c">
+          <form onSubmit={add}><div className="form-row">
+            <select value={form.employee_id} onChange={e=>setForm({...form,employee_id:e.target.value})} required><option value="">Zaměstnanec…</option>{employees.map(emp=>(<option key={emp.id} value={emp.id}>{emp.name}</option>))}</select>
+            <input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} required/>
+            <input type="number" step="0.25" value={form.hours} onChange={e=>setForm({...form,hours:e.target.value})} required/>
+          </div>
+          <div className="form-row">
+            <input placeholder="Místo" value={form.place} onChange={e=>setForm({...form,place:e.target.value})} style={{flex:1}}/>
+            <input placeholder="Popis činnosti" value={form.activity} onChange={e=>setForm({...form,activity:e.target.value})} style={{flex:2}}/>
+            <button type="submit">Přidat</button>
+          </div></form>
+          <table className="table"><thead><tr><th>Datum</th><th>Hodiny</th><th>Zaměstnanec</th><th>Místo</th><th>Popis činnosti</th><th></th></tr></thead><tbody>
+            {rows.map(r=>(<tr key={r.id}><td>{r.date}</td><td>{r.hours}</td><td>{r.employee_name || r.employee_id}</td><td>{r.place||"-"}</td><td>{r.activity||"-"}</td>
+              <td><button className="ghost" onClick={()=>del(r.id)}>Smazat</button></td></tr>))}
+          </tbody></table>{rows.length===0 && <div className="small">Zatím žádné hodiny.</div>}
+        </div></div>);
+      }
+
+      function JobDetail({jobId,onBack}){
+        const [data,setData]=useState(null); const [employees,setEmployees]=useState([]); const [selEmp,setSelEmp]=useState([]);
+        const [mat,setMat]=useState({name:"",qty:0,unit:"ks"}); const [tool,setTool]=useState({name:"",qty:0,unit:"ks"});
+        const [err,setErr]=useState("");
+        async function load(){ try{ const [d, e] = await Promise.all([api(`/api/jobs/${jobId}`), api("/api/employees")]); setData(d); setEmployees(e.employees||[]); setSelEmp(d.assignments||[]);}catch(e){ setErr(e.message);} }
+        useEffect(()=>{ load().catch(()=>{}); },[jobId]);
+        async function addMat(e){ e.preventDefault(); await api(`/api/jobs/${jobId}/materials`,{method:"POST",body:JSON.stringify(mat)}); setMat({name:"",qty:0,unit:"ks"}); load(); }
+        async function addTool(e){ e.preventDefault(); await api(`/api/jobs/${jobId}/tools`,{method:"POST",body:JSON.stringify(tool)}); setTool({name:"",qty:0,unit:"ks"}); load(); }
+        async function delMat(id){ await api(`/api/jobs/${jobId}/materials?id=${id}`,{method:"DELETE"}); load(); }
+        async function delTool(id){ await api(`/api/jobs/${jobId}/tools?id=${id}`,{method:"DELETE"}); load(); }
+        async function setAssign(){ await api(`/api/jobs/${jobId}/assignments`,{method:"POST",body:JSON.stringify({employee_ids:selEmp})}); load(); }
+        if(!data) return <div className="small">Načítám…</div>;
+        const j = data.job;
+        return (<div className="grid" style={{gridTemplateColumns:"1fr"}}>
+          <button className="ghost" onClick={onBack}>← Zpět na seznam</button>
+          <div className="card"><div className="card-h"><div><div style={{fontWeight:800,fontSize:18}}>{j.title}</div><div className="small">{j.client} • {j.city} • {j.code}</div></div><span className="badge">{j.status}</span></div>
+            <div className="card-c"><div className="kv small"><span>📅</span> <span>{j.date}</span></div>{j.note && <div className="small" style={{marginTop:8}}>{j.note}</div>}</div></div>
+          <div className="card"><div className="card-h"><div>Přiřazení zaměstnanci</div><button onClick={setAssign}>Uložit přiřazení</button></div>
+            <div className="card-c small"><div className="row h"><div style={{gridColumn:"span 6"}}>Jméno</div><div style={{gridColumn:"span 6"}}>Přiřazen</div></div>
+              {employees.map(e=> (<div className="row" key={e.id}><div style={{gridColumn:"span 6"}}>{e.name}</div><div style={{gridColumn:"span 6"}}><input type="checkbox" checked={selEmp.includes(e.id)} onChange={(ev)=>{ const checked=ev.target.checked; setSelEmp(s=> checked? [...new Set([...s, e.id])] : s.filter(x=>x!==e.id)); }}/></div></div>))}
+            </div></div>
+          <JobTasks jobId={jobId}/>
+          <JobHours jobId={jobId}/>
+          <div className="card"><div className="card-h"><div>Materiál</div><a className="ghost" href={`/export/job_materials.xlsx?job_id=${jobId}`}>Export XLSX</a></div>
+            <div className="card-c"><form onSubmit={addMat}><div className="form-row">
+              <input placeholder="Název" value={mat.name} onChange={e=>setMat({...mat,name:e.target.value})} required style={{flex:2}}/>
+              <input type="number" step="0.01" placeholder="Množství" value={mat.qty} onChange={e=>setMat({...mat,qty:e.target.value})} required style={{width:120}}/>
+              <input placeholder="Jedn." value={mat.unit} onChange={e=>setMat({...mat,unit:e.target.value})} required style={{width:80}}/>
+              <button type="submit">Přidat</button></div></form>
+              <div className="row h"><div style={{gridColumn:"span 7"}}>Název</div><div style={{gridColumn:"span 2",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 1"}}>Jedn.</div><div style={{gridColumn:"span 2",textAlign:"right"}}></div></div>
+              {(data.materials||[]).map(r=> (<div className="row small" key={r.id}><div style={{gridColumn:"span 7"}}>{r.name}</div><div style={{gridColumn:"span 2",textAlign:"right"}}>{r.qty}</div><div style={{gridColumn:"span 1"}}>{r.unit}</div><div style={{gridColumn:"span 2",textAlign:"right"}}><button className="ghost" onClick={()=>delMat(r.id)}>Smazat</button></div></div>))}
+              {data.materials?.length===0 && <div className="small">Zatím žádný materiál.</div>}</div></div>
+          <div className="card"><div className="card-h"><div>Nářadí</div></div>
+            <div className="card-c"><form onSubmit={addTool}><div className="form-row">
+              <input placeholder="Název" value={tool.name} onChange={e=>setTool({...tool,name:e.target.value})} required style={{flex:2}}/>
+              <input type="number" step="0.01" placeholder="Množství" value={tool.qty} onChange={e=>setTool({...tool,qty:e.target.value})} required style={{width:120}}/>
+              <input placeholder="Jedn." value={tool.unit} onChange={e=>setTool({...tool,unit:e.target.value})} required style={{width:80}}/>
+              <button type="submit">Přidat</button></div></form>
+              <div className="row h"><div style={{gridColumn:"span 7"}}>Název</div><div style={{gridColumn:"span 2",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 1"}}>Jedn.</div><div style={{gridColumn:"span 2",textAlign:"right"}}></div></div>
+              {(data.tools||[]).map(r=> (<div className="row small" key={r.id}><div style={{gridColumn:"span 7"}}>{r.name}</div><div style={{gridColumn:"span 2",textAlign:"right"}}>{r.qty}</div><div style={{gridColumn:"span 1"}}>{r.unit}</div><div style={{gridColumn:"span 2",textAlign:"right"}}><button className="ghost" onClick={()=>delTool(r.id)}>Smazat</button></div></div>))}
+              {data.tools?.length===0 && <div className="small">Zatím žádné nářadí.</div>}</div></div>
+          <div className="card"><div className="card-h"><div>Fotky</div></div>
+            <div className="card-c"><PhotoUploader jobId={jobId} onUploaded={load}/>
+              <div className="grid" style={{gridTemplateColumns:"repeat(5,1fr)"}}>
+                {(data.photos||[]).map(p=> (<div key={p.id}><img className="img-preview" src={`/uploads/${p.filename}`} alt="foto"/></div>))}
+              </div>
+              {data.photos?.length===0 && <div className="small">Zatím žádné fotky.</div>}
+            </div></div>
+        </div>);
+      }
+
+      function EmployeeDetail({employee,onBack}){
+        const [rows,setRows]=useState([]);
+        const [jobs,setJobs]=useState([]);
+        const [form,setForm]=useState({job_id:"",date:"",hours:0,place:"",activity:""});
+        async function load(){ try{ const [t,j] = await Promise.all([api("/api/timesheets?employee_id="+employee.id), api("/api/jobs")]); setRows(t.rows||[]); setJobs(j.jobs||[]); }catch(e){ console.error(e);} }
+        useEffect(()=>{ load().catch(()=>{}); },[employee.id]);
+        async function add(e){ e.preventDefault(); await api("/api/timesheets",{method:"POST",body:JSON.stringify({employee_id:employee.id, ...form})}); setForm({job_id:"",date:"",hours:0,place:"",activity:""}); load(); }
+        async function del(id){ if(!confirm("Smazat záznam?")) return; await api("/api/timesheets?id="+id,{method:"DELETE"}); load(); }
+        return (
+          <div className="grid" style={{gridTemplateColumns:"1fr"}}>
+            <button className="ghost" onClick={onBack}>← Zpět na seznam</button>
+            <div className="card">
+              <div className="card-h"><div>{employee.name} — výkazy hodin</div><a className="ghost" href={`/export/employee_hours.xlsx?employee_id=${employee.id}`}>Export XLSX</a></div>
+              <div className="card-c">
+                <form onSubmit={add}>
+                  <div className="form-row">
+                    <select value={form.job_id} onChange={e=>setForm({...form,job_id:e.target.value})} required>
+                      <option value="">Vyber zakázku…</option>
+                      {jobs.map(j=>(<option key={j.id} value={j.id}>{j.title} ({j.code})</option>))}
+                    </select>
+                    <input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})} required/>
+                    <input type="number" step="0.25" value={form.hours} onChange={e=>setForm({...form,hours:e.target.value})} required/>
+                  </div>
+                  <div className="form-row">
+                    <input placeholder="Místo (např. Praha 6)" value={form.place} onChange={e=>setForm({...form,place:e.target.value})} style={{flex:1}}/>
+                    <input placeholder="Popis činnosti" value={form.activity} onChange={e=>setForm({...form,activity:e.target.value})} style={{flex:2}}/>
+                    <button type="submit">Přidat</button>
+                  </div>
+                </form>
+                <table className="table">
+                  <thead><tr><th>Datum</th><th>Hodiny</th><th>Zakázka</th><th>Místo</th><th>Popis činnosti</th><th></th></tr></thead>
+                  <tbody>
+                    {rows.map(r=>(
+                      <tr key={r.id}>
+                        <td>{r.date}</td><td>{r.hours}</td><td>{r.job_title}</td><td>{r.place||"-"}</td><td>{r.activity||"-"}</td>
+                        <td><button className="ghost" onClick={()=>del(r.id)}>Smazat</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {rows.length===0 && <div className="small">Zatím žádné záznamy.</div>}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      const CATS = ['trvalky','trávy','dřeviny','stromy','cibuloviny','hnojiva/postřiky','materiál zahrada','materiál stavba'];
+      function Warehouse(){
+        const [site,setSite]=useState("lipnik"); const [list,setList]=useState([]); const [form,setForm]=useState({category:CATS[0],name:"",qty:0,unit:"ks"}); const [q,setQ]=useState("");
+        async function load(){ try{ const j=await api("/api/items?site="+site); setList(j.items||[]); }catch(e){ console.error(e);} } useEffect(()=>{ load().catch(()=>{}); },[site]);
+        async function add(e){ e.preventDefault(); await api("/api/items",{method:"POST",body:JSON.stringify({...form,site})}); setForm({category:CATS[0],name:"",qty:0,unit:"ks"}); load(); }
+        async function del(id){ if(!confirm("Smazat položku?")) return; await api("/api/items?id="+id,{method:"DELETE"}); load(); }
+        const filtered = React.useMemo(()=> list.filter(r=> (r.name||"").toLowerCase().includes(q.toLowerCase())), [list,q]);
+        return (<div><div style={{display:"flex",gap:8,alignItems:"center",margin:"8px 0 12px"}}>
+          <div className="tabs"><div className={"tab"+(site==="lipnik"?" active":"")} onClick={()=>setSite("lipnik")}>Lipník</div><div className={"tab"+(site==="praha"?" active":"")} onClick={()=>setSite("praha")}>Praha</div></div>
+          <div className="search" style={{flex:1}}><input value={q} onChange={e=> setQ(e.target.value)} placeholder="Hledat položku…"/><button className="ghost">Hledat</button></div>
+          <a className="ghost" href="/export/warehouse.xlsx">Export XLSX</a></div>
+          <div className="card"><div className="card-h"><div>Nová položka</div></div><div className="card-c">
+            <form onSubmit={add}><div className="form-row">
+              <select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{CATS.map(c=>(<option key={c}>{c}</option>))}</select>
+              <input placeholder="Název" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:2}}/>
+              <input type="number" step="0.01" placeholder="Množství" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})} required style={{width:120}}/>
+              <input placeholder="Jedn." value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} required style={{width:80}}/>
+              <button type="submit">Přidat</button></div></form></div></div>
+          <div className="card"><div className="card-h"><div>Inventář – {site==="lipnik"?"Lipník":"Praha"}</div></div><div className="card-c">
+            <div className="row h"><div style={{gridColumn:"span 4"}}>Kategorie</div><div style={{gridColumn:"span 6"}}>Název</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Množství</div><div style={{gridColumn:"span 1",textAlign:"right"}}>Jedn.</div></div>
+            {filtered.length===0 && <div className="small">Prázdné – přidej položky výše.</div>}
+            {filtered.map(r=> (<div className="row small" key={r.id}><div style={{gridColumn:"span 4"}}>{r.category}</div><div style={{gridColumn:"span 6"}}>{r.name}</div><div style={{gridColumn:"span 1",textAlign:"right"}}>{r.qty}</div><div style={{gridColumn:"span 1",textAlign:"right"}}>{r.unit}</div>
+              <div style={{gridColumn:"span 12",textAlign:"right"}}><button className="ghost" onClick={()=>del(r.id)}>Smazat</button></div></div>))}
+          </div></div></div>);
+      }
+
+      function UsersTab(){
+        const [list,setList]=useState([]); const [form,setForm]=useState({email:"",name:"",role:"worker",password:""}); const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/users"); setList(j.users||[]); }catch(e){ setErr(e.message);} } useEffect(()=>{load().catch(()=>{}); },[]);
+        async function create(e){ e.preventDefault(); await api("/api/users",{method:"POST",body:JSON.stringify(form)}); setForm({email:"",name:"",role:"worker",password:""}); load(); }
+        async function setRole(id,role){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id,role})}); load(); }
+        async function toggleActive(u){ await api("/api/users",{method:"PATCH",body:JSON.stringify({id:u.id,active:!u.active})}); load(); }
+        return (<div className="grid" style={{gridTemplateColumns:"1fr"}}>
+          <div className="card"><div className="card-h"><div>Nový uživatel</div></div><div className="card-c">
+            <form onSubmit={create}><div className="form-row">
+              <input placeholder="E‑mail" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required style={{flex:1}}/>
+              <input placeholder="Jméno" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:1}}/></div>
+              <div className="form-row"><select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option value="worker">worker</option><option value="manager">manager</option><option value="admin">admin</option></select>
+              <input type="password" placeholder="Heslo" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required/><button type="submit">Vytvořit</button></div></form>
+          </div></div>
+          <div className="card"><div className="card-h"><div>Uživatelé</div></div><div className="card-c">
+            {err && <div className="small" style={{color:"#ffbcbc"}}>{err}</div>}
+            <table className="table"><thead><tr><th>ID</th><th>E‑mail</th><th>Jméno</th><th>Role</th><th>Aktivní</th><th></th></tr></thead><tbody>
+              {list.map(u=>(<tr key={u.id}><td>{u.id}</td><td>{u.email}</td><td>{u.name}</td><td>{u.role}</td><td>{u.active? "ano":"ne"}</td>
+                <td className="small"><button className="ghost" onClick={()=>setRole(u.id,"worker")}>worker</button>
+                  <button className="ghost" onClick={()=>setRole(u.id,"manager")}>manager</button>
+                  <button className="ghost" onClick={()=>setRole(u.id,"admin")}>admin</button>
+                  <button className="ghost" onClick={()=>toggleActive(u)}>{u.active?"deaktivovat":"aktivovat"}</button></td></tr>))}
+            </tbody></table>
+          </div></div>
+        </div>);
+      }
+
+      function TasksTab(){
+        const [list,setList]=useState([]);
+        const [employees,setEmployees]=useState([]);
+        const [jobs,setJobs]=useState([]);
+        const [form,setForm]=useState({title:"",description:"",due_date:"",employee_id:"",job_id:""});
+        async function load(){ try{ const [t,e,j]=await Promise.all([api("/api/tasks"), api("/api/employees"), api("/api/jobs")]); setList(t.tasks||[]); setEmployees(e.employees||[]); setJobs(j.jobs||[]); }catch(e){ console.error(e);} }
+        useEffect(()=>{ load().catch(()=>{}); },[]);
+        async function add(e){ e.preventDefault(); await api("/api/tasks",{method:"POST",body:JSON.stringify(form)}); setForm({title:"",description:"",due_date:"",employee_id:"",job_id:""}); load(); }
+        async function setStatus(t, status){ await api("/api/tasks",{method:"PATCH",body:JSON.stringify({id:t.id,status})}); load(); }
+        async function del(t){ if(!confirm("Smazat úkol?")) return; await api("/api/tasks?id="+t.id,{method:"DELETE"}); load(); }
+        return (<div className="grid" style={{gridTemplateColumns:"1fr"}}>
+          <div className="card"><div className="card-h"><div>Úkoly</div></div><div className="card-c">
+            <form onSubmit={add}><div className="form-row">
+              <input placeholder="Nadpis" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} required style={{flex:2}}/>
+              <input placeholder="Termín (YYYY-MM-DD)" value={form.due_date} onChange={e=>setForm({...form,due_date:e.target.value})}/>
+              <select value={form.employee_id} onChange={e=>setForm({...form,employee_id:e.target.value})}><option value="">Bez přiřazení</option>{employees.map(emp=>(<option key={emp.id} value={emp.id}>{emp.name}</option>))}</select>
+              <select value={form.job_id} onChange={e=>setForm({...form,job_id:e.target.value})}><option value="">Bez zakázky</option>{jobs.map(j=>(<option key={j.id} value={j.id}>{j.title}</option>))}</select>
+              <button type="submit">Přidat</button>
+            </div><div className="form-row"><input placeholder="Popis" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} style={{flex:1}}/></div></form>
+            <table className="table"><thead><tr><th>Stav</th><th>Název</th><th>Zaměstnanec</th><th>Zakázka</th><th>Termín</th><th></th></tr></thead><tbody>
+              {list.map(t=>(<tr key={t.id}><td><span className="badge">{t.status}</span></td><td>{t.title}</td><td>{t.employee_id || "-"}</td><td>{t.job_id || "-"}</td><td>{t.due_date || "-"}</td>
+              <td className="small"><button className="ghost" onClick={()=>setStatus(t,"nový")}>nový</button><button className="ghost" onClick={()=>setStatus(t,"probíhá")}>probíhá</button><button className="ghost" onClick={()=>setStatus(t,"hotovo")}>hotovo</button><button className="ghost" onClick={()=>del(t)}>smazat</button></td></tr>))}
+            </tbody></table>
+            {list.length===0 && <div className="small">Zatím žádné úkoly.</div>}
+          </div></div>
+        </div>);
+      }
+
+      function App(){
+        const [auth,setAuth]=useState({ready:false, ok:false, user:null, tasks:0}); const [tab, setTab] = useState("jobs"); const [jobOpen,setJobOpen]=useState(null);
+        useEffect(()=>{(async()=>{ try{ const j=await api("/api/me"); setAuth({ready:true, ok:j.authenticated, user:j.user||null, tasks:j.tasks_count||0}); refreshUserBox(); }catch(e){ showJSError(e.message);} })()},[]);
+        if(!auth.ready) return <div className="small">Načítám…</div>;
+        if(!auth.ok) return <Login onLogged={()=>location.reload()}/>;
+        return (<div>
+          <Tabs value={tab} onChange={(k)=>{ setTab(k); setJobOpen(null); }} canAdmin={auth.user?.role==="admin"} taskCount={auth.tasks}/>
+          <div style={{height:12}}/>
+          {tab==="jobs" && (jobOpen? <JobDetail jobId={jobOpen} onBack={()=>setJobOpen(null)}/> : <JobsList onOpen={setJobOpen}/>)}
+          {tab==="tasks" && <TasksTab/>}
+          {tab==="employees" && <Employees/>}
+          {tab==="warehouse" && <Warehouse/>}
+          {tab==="users" && auth.user?.role==="admin" && <UsersTab/>}
+        </div>);
+      }
+
+      // Employees root (needs after App def)
+      function Employees(){
+        const [list,setList]=useState([]);
+        const [form,setForm]=useState({name:"",role:"Zahradník"});
+        const [open,setOpen]=useState(null);
+        const [err,setErr]=useState("");
+        async function load(){ try{ const j=await api("/api/employees"); setList(j.employees||[]); }catch(e){ setErr(e.message);} }
+        useEffect(()=>{ load().catch(()=>{}); },[]);
+        async function add(e){ e.preventDefault(); await api("/api/employees",{method:"POST",body:JSON.stringify(form)}); setForm({name:"",role:"Zahradník"}); load(); }
+        async function del(id){ if(!confirm("Smazat zaměstnance?")) return; await api("/api/employees?id="+id,{method:"DELETE"}); load(); }
+        if(open){ const emp=list.find(x=>x.id===open); if(emp) return <EmployeeDetail employee={emp} onBack={()=>setOpen(null)}/>; }
+        return (
+          <div className="grid" style={{gridTemplateColumns:"1fr"}}>
+            <div className="card">
+              <div className="card-h"><div>Nový zaměstnanec</div></div>
+              <div className="card-c">
+                <form onSubmit={add}>
+                  <div className="form-row">
+                    <input placeholder="Jméno" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required style={{flex:1}}/>
+                    <input placeholder="Role (např. Zahradník)" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} required style={{flex:1}}/>
+                    <button type="submit">Přidat</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-h"><div>Seznam</div></div>
+              <div className="card-c">
+                {err && <div className="small" style={{color:"#ffbcbc"}}>{err}</div>}
+                <table className="table">
+                  <thead><tr><th>ID</th><th>Jméno</th><th>Role</th><th></th></tr></thead>
+                  <tbody>
+                    {list.map(e=>(
+                      <tr key={e.id}>
+                        <td>{e.id}</td><td><span className="linklike" onClick={()=>setOpen(e.id)}>{e.name}</span></td><td>{e.role}</td>
+                        <td>
+                          <button onClick={()=>setOpen(e.id)}>Detail</button>
+                          <button className="ghost" onClick={()=>del(e.id)} style={{marginLeft:6}}>Smazat</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {list.length===0 && <div className="small">Zatím žádní zaměstnanci – přidej prvního výše.</div>}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("app")).render(<App/>);
+    </script>
+  </body>
+</html>

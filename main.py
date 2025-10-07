@@ -8,7 +8,7 @@ DB_PATH = os.environ.get("DB_PATH", "app.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-" + os.urandom(16).hex())
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "uploads")
 
-app = Flask(__name__, static_folder=".", static_url_path="")
+app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.secret_key = SECRET_KEY
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -863,3 +863,14 @@ def api_admin_resets():
         db.execute("DELETE FROM password_resets WHERE id=?", (rid,))
         db.commit()
         return jsonify({"ok": True})
+
+
+# ----- home redirect -----
+@app.route("/")
+def home_page():
+    u = current_user()
+    if not u:
+        return redirect("/login")
+    # If you want a dashboard template later, render it here.
+    # For now, serve static homepage or redirect to an app section.
+    return send_from_directory(app.static_folder, "index.html")
