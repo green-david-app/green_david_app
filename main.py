@@ -868,9 +868,7 @@ def api_admin_resets():
 # ----- home redirect -----
 @app.route("/")
 def home_page():
-    u = current_user()
-    if not u:
-        return redirect("/login")
+    return redirect("/login")
     # If you want a dashboard template later, render it here.
     # For now, serve static homepage or redirect to an app section.
     return send_from_directory(app.static_folder, "index.html")
