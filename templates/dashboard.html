@@ -1,0 +1,10 @@
+
+{% extends "layout.html" %}
+{% block content %}
+  <h1>Dashboard</h1>
+  <p class="muted">Vítej, {{ user.email }}.</p>
+  <div class="row" style="display:flex;gap:12px;flex-wrap:wrap">
+    <a class="btn" href="/export/xlsx">Export XLSX</a>
+    <a class="btn ghost" href="/logout">Odhlásit</a>
+  </div>
+{% endblock %}

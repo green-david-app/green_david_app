@@ -148,8 +148,11 @@ def ensure_db():
 
 # ---------- static ----------
 @app.route("/")
-def index():
-    return send_from_directory(".", "index.html")
+def home_redirect():
+    u = current_user()
+    if not u:
+        return redirect("/login")
+    return redirect("/dashboard")
 
 @app.route("/uploads/<path:name>")
 def uploaded_file(name):
@@ -867,14 +870,12 @@ def api_admin_resets():
 
 # ----- home redirect -----
 @app.route("/")
-def home_page():
-    return redirect("/login")
-    # If you want a dashboard template later, render it here.
-    # For now, serve static homepage or redirect to an app section.
-    return send_from_directory(app.static_folder, "index.html")
+def home_redirect():
+    u = current_user()
+    if not u:
+        return redirect("/login")
+    return redirect("/dashboard")
 
-
-# ----- force redirect for "/" before other routes -----
 @app.before_request
 def _redirect_root_if_anonymous():
     try:
@@ -900,3 +901,11 @@ def favicon():
     except Exception:
         from flask import Response
         return Response(status=204)
+
+
+@app.route("/dashboard")
+def dashboard_page():
+    u, err = require_auth()
+    if err: 
+        return redirect("/login")
+    return render_template("dashboard.html", title="Dashboard", user=u)
