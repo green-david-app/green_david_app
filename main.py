@@ -1,7 +1,7 @@
 
 import os, re, io, base64, sqlite3
 from datetime import datetime
-from flask import Flask, send_from_directory, request, jsonify, session, g, send_file, abort
+from flask import Flask, send_from_directory, request, jsonify, session, g, send_file, abort, render_template, redirect, url_for, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DB_PATH = os.environ.get("DB_PATH", "app.db")
@@ -24,9 +24,7 @@ def close_db(error=None):
     if db is not None:
         db.close()
 
-
 # ---------- migrations ----------
-
 def get_version(db):
     db.execute("CREATE TABLE IF NOT EXISTS app_meta (id INTEGER PRIMARY KEY CHECK (id=1), version INTEGER NOT NULL)")
     row = db.execute("SELECT version FROM app_meta WHERE id=1").fetchone()
@@ -147,12 +145,6 @@ def ensure_db():
     seed_admin(db)
 
 # ---------- static ----------
-@app.route("/")
-def home_redirect():
-    u = current_user()
-    if not u:
-        return redirect("/login")
-    return redirect("/dashboard")
 
 @app.route("/uploads/<path:name>")
 def uploaded_file(name):
@@ -656,256 +648,14 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
 
-
-# ----- add: password_resets table (id,user_id,token,created_at,confirmed) -----
-def ensure_password_resets_table(db):
-    db.execute("""CREATE TABLE IF NOT EXISTS password_resets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        token TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        confirmed INTEGER NOT NULL DEFAULT 0,
-        used INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    )""")
-    db.commit()
-
-
-# ----- security headers & healthz -----
-@app.after_request
-def add_security_headers(resp):
-    resp.headers.setdefault("X-Content-Type-Options","nosniff")
-    resp.headers.setdefault("X-Frame-Options","DENY")
-    resp.headers.setdefault("Referrer-Policy","no-referrer")
-    resp.headers.setdefault("Permissions-Policy","geolocation=(), microphone=(), camera=()")
-    # Basic CSP allowing our inline styles and same-origin resources
-    resp.headers.setdefault("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';")
-    return resp
-
-@app.route("/healthz")
-def healthz():
-    try:
-        db = get_db()
-        ensure_password_resets_table(db)
-        db.execute("SELECT 1").fetchone()
-        return jsonify(ok=True, db="ok")
-    except Exception as e:
-        return jsonify(ok=False, error=str(e)), 500
-
-# ----- web pages -----
-from flask import render_template, redirect, url_for, flash
-
-@app.route("/login", methods=["GET","POST"])
-def login_page():
-    if request.method == "GET":
-        return render_template("login.html", title="Přihlášení")
-    # POST -> call API login
-    data = {"email": request.form.get("email","").strip().lower(), "password": request.form.get("password","")}
-    res = api_login_proxy(data)
-    if res.get("ok"):
-        return redirect("/")
-    flash(res.get("error","Chyba přihlášení"), "error")
-    return redirect(url_for("login_page"))
-
-@app.route("/register", methods=["GET","POST"])
-def register_page():
-    if request.method == "GET":
-        return render_template("register.html", title="Registrace")
-    data = {"email": request.form.get("email","").strip().lower(), "password": request.form.get("password",""), "name": request.form.get("name","").strip()}
-    res = api_register_proxy(data)
-    if res.get("ok"):
-        flash("Registrace odeslána. Počkejte na schválení administrátorem.", "success")
-        return redirect("/login")
-    flash(res.get("error","Chyba registrace"), "error")
-    return redirect(url_for("register_page"))
-
-@app.route("/forgot", methods=["GET","POST"])
-def forgot_page():
-    if request.method == "GET":
-        return render_template("forgot.html", title="Zapomenuté heslo")
-    data = {"email": request.form.get("email","").strip().lower()}
-    res = api_forgot_proxy(data)
-    if res.get("ok"):
-        flash("Žádost o reset byla zaznamenána. Po schválení adminem obdržíte odkaz.", "success")
-        return redirect("/login")
-    flash(res.get("error","Chyba"), "error")
-    return redirect(url_for("forgot_page"))
-
-@app.route("/reset/<token>", methods=["GET","POST"])
-def reset_page(token):
-    if request.method == "GET":
-        return render_template("reset.html", title="Reset hesla", token=token)
-    data = {"token": token, "password": request.form.get("password","")}
-    res = api_reset_proxy(data)
-    if res.get("ok"):
-        flash("Heslo bylo změněno, můžete se přihlásit.", "success")
-        return redirect("/login")
-    flash(res.get("error","Chyba resetu"), "error")
-    return redirect(url_for("reset_page", token=token))
-
-# ----- API helpers (call existing or new endpoints) -----
-def api_login_proxy(data):
-    # reuse existing /api/login route logic
-    with app.test_request_context(json=data):
-        return api_login().json
-
-# Create /api/register, /api/password/forgot, /api/password/reset and admin approvals
-@app.route("/api/register", methods=["POST"])
-def api_register():
-    data = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-    name = (data.get("name") or "").strip()
-    if not email or not password:
-        return jsonify({"ok": False, "error":"missing_fields"}), 400
-    db = get_db()
-    ensure_password_resets_table(db)
-    ex = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-    if ex:
-        return jsonify({"ok": False, "error":"email_exists"}), 400
-    db.execute("INSERT INTO users(email,name,role,password_hash,active,created_at) VALUES (?,?,?,?,0,?)",
-               (email, name, "user", generate_password_hash(password), datetime.utcnow().isoformat()))
-    db.commit()
-    return jsonify({"ok": True})
-
-@app.route("/api/password/forgot", methods=["POST"])
-def api_password_forgot():
-    data = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    if not email:
-        return jsonify({"ok": False, "error":"missing_email"}), 400
-    db = get_db()
-    ensure_password_resets_table(db)
-    u = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-    if not u:
-        # Do not reveal existence
-        return jsonify({"ok": True})
-    token = secrets.token_urlsafe(32)
-    db.execute("INSERT INTO password_resets(user_id, token, created_at, confirmed, used) VALUES (?,?,?,?,0)",
-               (u["id"], token, datetime.utcnow().isoformat(), 0))
-    db.commit()
-    # In real deployment you would email token link; here admin approves first.
-    return jsonify({"ok": True, "token":"PENDING_ADMIN_APPROVAL"})
-
-@app.route("/api/password/reset", methods=["POST"])
-def api_password_reset():
-    data = request.get_json(force=True, silent=True) or {}
-    token = (data.get("token") or "").strip()
-    new_pass = data.get("password") or ""
-    if not token or not new_pass:
-        return jsonify({"ok": False, "error":"missing_fields"}), 400
-    db = get_db()
-    ensure_password_resets_table(db)
-    row = db.execute("SELECT pr.id, pr.user_id, pr.confirmed, pr.used FROM password_resets pr WHERE pr.token=?", (token,)).fetchone()
-    if not row:
-        return jsonify({"ok": False, "error":"invalid_token"}), 400
-    if not row["confirmed"] or row["used"]:
-        return jsonify({"ok": False, "error":"not_confirmed"}), 400
-    db.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new_pass), row["user_id"]))
-    db.execute("UPDATE password_resets SET used=1 WHERE id=?", (row["id"],))
-    db.commit()
-    return jsonify({"ok": True})
-
-def api_register_proxy(data):
-    with app.test_request_context(json=data):
-        resp = api_register()
-        try:
-            return resp[0].json if isinstance(resp, tuple) else resp.json
-        except Exception:
-            return {"ok": False, "error":"internal"}
-
-def api_forgot_proxy(data):
-    with app.test_request_context(json=data):
-        resp = api_password_forgot()
-        try:
-            return resp[0].json if isinstance(resp, tuple) else resp.json
-        except Exception:
-            return {"ok": False, "error":"internal"}
-
-def api_reset_proxy(data):
-    with app.test_request_context(json=data):
-        resp = api_password_reset()
-        try:
-            return resp[0].json if isinstance(resp, tuple) else resp.json
-        except Exception:
-            return {"ok": False, "error":"internal"}
-
-# ----- Admin: separate login URL and approval UIs (API) -----
-@app.route("/admin/login", methods=["GET","POST"])
-def admin_login_page():
-    if request.method == "GET":
-        return render_template("login.html", title="Admin přihlášení")
-    data = {"email": request.form.get("email","").strip().lower(), "password": request.form.get("password","")}
-    res = api_login_proxy(data)
-    # allow only admin
-    u = current_user()
-    if not (res.get("ok") and u and u.get("role") in ("admin",)):
-        from flask import redirect
-        return redirect("/login")
-    return redirect("/")
-
-@app.route("/api/admin/resets", methods=["GET","POST","DELETE"])
-def api_admin_resets():
-    u, err = require_role(write=True)
-    if err: return err
-    if u["role"] != "admin":
-        return jsonify({"ok": False, "error":"forbidden"}), 403
-    db = get_db()
-    ensure_password_resets_table(db)
-    if request.method == "GET":
-        rows = db.execute("SELECT pr.id, pr.token, pr.confirmed, pr.used, pr.created_at, users.email FROM password_resets pr JOIN users ON users.id=pr.user_id ORDER BY pr.id DESC").fetchall()
-        return jsonify({"ok": True, "resets":[dict(r) for r in rows]})
-    data = request.get_json(force=True, silent=True) or {}
-    if request.method == "POST":
-        rid = int(data.get("id") or 0)
-        db.execute("UPDATE password_resets SET confirmed=1 WHERE id=?", (rid,))
-        db.commit()
-        return jsonify({"ok": True})
-    if request.method == "DELETE":
-        rid = int(data.get("id") or 0)
-        db.execute("DELETE FROM password_resets WHERE id=?", (rid,))
-        db.commit()
-        return jsonify({"ok": True})
-
-
-# ----- home redirect -----
-@app.route("/")
-def home_redirect():
+# ----- unified home & index routes (deduped) -----
+@app.route("/", endpoint="root")
+def root():
     u = current_user()
     if not u:
         return redirect("/login")
     return redirect("/dashboard")
 
-@app.before_request
-def _redirect_root_if_anonymous():
-    try:
-        p = request.path.rstrip("/") or "/"
-        if p in ("/", "/index.html"):
-            u = current_user()
-            if not u:
-                return redirect(url_for("login_page"))
-    except Exception:
-        pass
-
-
-@app.route("/index.html")
-def index_fallback():
+@app.route("/index.html", endpoint="index_alias")
+def index_alias():
     return redirect("/")
-
-
-@app.route("/favicon.ico")
-def favicon():
-    # Return empty 204 or serve from static if present
-    try:
-        return send_from_directory(app.static_folder, "favicon.ico")
-    except Exception:
-        from flask import Response
-        return Response(status=204)
-
-
-@app.route("/dashboard")
-def dashboard_page():
-    u, err = require_auth()
-    if err: 
-        return redirect("/login")
-    return render_template("dashboard.html", title="Dashboard", user=u)
