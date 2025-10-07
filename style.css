@@ -44,3 +44,9 @@ button.ghost{background:var(--panel);color:var(--txt-inv);border:1px solid var(-
 .error-overlay{background:#ffe7e7;border:1px solid #ffb8b8;color:#5a0000;border-radius:12px;padding:12px;margin:14px 0;white-space:pre-wrap}
 .linklike{color:#b6f3c9;cursor:pointer}
 .linklike:hover{text-decoration:underline}
+
+
+.toast{background:#111827;color:#f9fafb;padding:10px 12px;border-radius:10px;margin:8px 0;box-shadow:0 6px 20px rgba(0,0,0,.18)}
+.toast.success{background:#065f46}
+.toast.error{background:#7f1d1d}
+
