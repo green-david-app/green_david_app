@@ -1,0 +1,17 @@
+
+{% extends "layout.html" %}
+{% block content %}
+  <h1>Přihlášení</h1>
+  <form method="post" action="/login" style="display:grid;gap:12px;max-width:420px">
+    <label>
+      <div>Email</div>
+      <input name="email" type="email" required placeholder="email@domena.cz"/>
+    </label>
+    <label>
+      <div>Heslo</div>
+      <input name="password" type="password" required placeholder="••••••••"/>
+    </label>
+    <button type="submit">Přihlásit se</button>
+  </form>
+  <p style="margin-top:8px"><a href="/forgot">Zapomenuté heslo</a></p>
+{% endblock %}

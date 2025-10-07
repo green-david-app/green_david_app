@@ -1,0 +1,13 @@
+
+{% extends "layout.html" %}
+{% block content %}
+  <h1>Nastavit nové heslo</h1>
+  <p class="muted">Pokračujte pouze pokud administrátor žádost schválil.</p>
+  <form method="post" action="/reset/{{ token }}" style="display:grid;gap:12px;max-width:420px">
+    <label>
+      <div>Nové heslo</div>
+      <input name="password" type="password" minlength="8" required/>
+    </label>
+    <button type="submit">Nastavit heslo</button>
+  </form>
+{% endblock %}

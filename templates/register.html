@@ -1,0 +1,21 @@
+
+{% extends "layout.html" %}
+{% block content %}
+  <h1>Vytvořit účet</h1>
+  <p class="muted">Po odeslání registrace musí administrátor účet schválit.</p>
+  <form method="post" action="/register" style="display:grid;gap:12px;max-width:420px">
+    <label>
+      <div>Email</div>
+      <input name="email" type="email" required/>
+    </label>
+    <label>
+      <div>Heslo</div>
+      <input name="password" type="password" required minlength="8"/>
+    </label>
+    <label>
+      <div>Jméno (volitelné)</div>
+      <input name="name" type="text"/>
+    </label>
+    <button type="submit">Vytvořit</button>
+  </form>
+{% endblock %}

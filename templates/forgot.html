@@ -1,0 +1,13 @@
+
+{% extends "layout.html" %}
+{% block content %}
+  <h1>Zapomenuté heslo</h1>
+  <p class="muted">Požadavek se uloží k odsouhlasení administrátorem.</p>
+  <form method="post" action="/forgot" style="display:grid;gap:12px;max-width:420px">
+    <label>
+      <div>Email</div>
+      <input name="email" type="email" required/>
+    </label>
+    <button type="submit">Odeslat žádost</button>
+  </form>
+{% endblock %}
