@@ -8,7 +8,7 @@ DB_PATH = os.environ.get("DB_PATH", "app.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-" + os.urandom(16).hex())
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "uploads")
 
-app = Flask(__name__, static_folder="static", static_url_path="/static")
+app = Flask(__name__, static_folder="static", static_url_path="/static", template_folder="templates")
 app.secret_key = SECRET_KEY
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -872,3 +872,31 @@ def home_page():
     # If you want a dashboard template later, render it here.
     # For now, serve static homepage or redirect to an app section.
     return send_from_directory(app.static_folder, "index.html")
+
+
+# ----- force redirect for "/" before other routes -----
+@app.before_request
+def _redirect_root_if_anonymous():
+    try:
+        p = request.path.rstrip("/") or "/"
+        if p in ("/", "/index.html"):
+            u = current_user()
+            if not u:
+                return redirect(url_for("login_page"))
+    except Exception:
+        pass
+
+
+@app.route("/index.html")
+def index_fallback():
+    return redirect("/")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    # Return empty 204 or serve from static if present
+    try:
+        return send_from_directory(app.static_folder, "favicon.ico")
+    except Exception:
+        from flask import Response
+        return Response(status=204)
